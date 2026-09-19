@@ -10,7 +10,22 @@ def validate_github_url(url: str) -> bool:
 
 def clone_repository(url: str, dest_dir: str):
     """Shallow clone a repository."""
-    git.Repo.clone_from(url, dest_dir, depth=1)
+    git.Repo.clone_from(url, dest_dir)
+
+
+def extract_commits(repo_path: str):
+    """Return commit metadata from a cloned repository."""
+    repository = git.Repo(repo_path)
+    return [
+        {
+            "sha": commit.hexsha,
+            "author_name": commit.author.name,
+            "author_email": commit.author.email,
+            "message": commit.message,
+            "committed_at": commit.committed_datetime,
+        }
+        for commit in repository.iter_commits()
+    ]
 
 def discover_files(repo_path: str) -> List[str]:
     """Discover files, skipping unwanted directories and files."""
