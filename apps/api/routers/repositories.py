@@ -4,13 +4,14 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from database import get_db
-from models import Repository, File, Symbol, Dependency, RepositoryStatus
+from models import Repository, File, Symbol, Dependency, RepositoryStatus, Commit
 from schemas import (
     RepositoryCreate,
     RepositoryResponse,
     DependencyResponse,
     PaginatedFiles,
     PaginatedSymbols,
+    PaginatedCommits,
 )
 from services.ingestion_job import process_repository
 
@@ -100,3 +101,19 @@ def get_repository_symbols(
     total = query.count()
     items = query.offset((page - 1) * size).limit(size).all()
     return {"items": items, "total": total, "page": page, "size": size}
+
+@router.get("/{repo_id}/commits", response_model=PaginatedCommits)
+def get_repository_commits(
+    repo_id: int,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    query = db.query(Commit).filter(Commit.repository_id == repo_id).order_by(Commit.committed_at.desc())
+    total = query.count()
+    items = query.offset((page - 1) * limit).limit(limit).all()
+    return {"items": items, "total": total, "page": page, "limit": limit}

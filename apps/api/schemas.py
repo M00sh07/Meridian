@@ -50,3 +50,18 @@ class PaginatedSymbols(BaseModel):
     total: int
     page: int
     size: int
+
+class CommitResponse(BaseModel):
+    sha: str
+    author_name: Optional[str] = None
+    author_email: Optional[str] = None
+    message: str
+    committed_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class PaginatedCommits(BaseModel):
+    items: List[CommitResponse]
+    total: int
+    page: int
+    limit: int
