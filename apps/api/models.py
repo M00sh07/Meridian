@@ -33,6 +33,17 @@ class File(Base):
 
     repository = relationship("Repository", back_populates="files")
     symbols = relationship("Symbol", back_populates="file", cascade="all, delete-orphan")
+    outgoing_dependencies = relationship(
+        "Dependency",
+        foreign_keys="Dependency.source_file_id",
+        back_populates="source_file",
+        cascade="all, delete-orphan",
+    )
+    incoming_dependencies = relationship(
+        "Dependency",
+        foreign_keys="Dependency.target_file_id",
+        back_populates="target_file",
+    )
 
 class Symbol(Base):
     __tablename__ = "symbols"
@@ -46,3 +57,19 @@ class Symbol(Base):
     end_line = Column(Integer, nullable=False)
 
     file = relationship("File", back_populates="symbols")
+
+
+class Dependency(Base):
+    __tablename__ = "dependencies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_file_id = Column(Integer, ForeignKey("files.id"), nullable=False, index=True)
+    target_file_id = Column(Integer, ForeignKey("files.id"), nullable=True, index=True)
+    imported_module = Column(String, nullable=False)
+
+    source_file = relationship(
+        "File", foreign_keys=[source_file_id], back_populates="outgoing_dependencies"
+    )
+    target_file = relationship(
+        "File", foreign_keys=[target_file_id], back_populates="incoming_dependencies"
+    )
