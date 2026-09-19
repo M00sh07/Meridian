@@ -74,3 +74,53 @@ def parse_file(file_path: str) -> List[Dict[str, Any]]:
 
     traverse(tree.root_node)
     return symbols
+
+
+def extract_imports(file_path: str) -> List[str]:
+    """Extract imported module names from supported source files."""
+    ext = os.path.splitext(file_path)[1].lower()
+    lang = EXT_TO_LANG.get(ext)
+
+    if not lang:
+        return []
+
+    parser = Parser(lang)
+    with open(file_path, 'rb') as f:
+        source_code = f.read()
+
+    tree = parser.parse(source_code)
+    imports = []
+
+    def node_text(node):
+        return source_code[node.start_byte:node.end_byte].decode('utf8')
+
+    def add_import(value):
+        value = value.strip().strip('"\'')
+        if value and value not in imports:
+            imports.append(value)
+
+    def traverse(node):
+        if node.type in ['import_statement', 'import_from_statement']:
+            source_node = node.child_by_field_name('source')
+            if source_node:
+                add_import(node_text(source_node))
+            else:
+                statement = node_text(node)
+                if statement.startswith('import '):
+                    for imported in statement[7:].split(','):
+                        add_import(imported.split(' as ', 1)[0])
+                elif statement.startswith('from '):
+                    add_import(statement[5:].split(' import ', 1)[0])
+        elif node.type == 'call_expression':
+            function = node.child_by_field_name('function')
+            arguments = node.child_by_field_name('arguments')
+            if function and arguments and node_text(function) == 'require':
+                argument = arguments.named_children[0] if arguments.named_children else None
+                if argument:
+                    add_import(node_text(argument))
+
+        for child in node.children:
+            traverse(child)
+
+    traverse(tree.root_node)
+    return imports

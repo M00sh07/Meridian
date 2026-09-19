@@ -17,16 +17,30 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [repos, setRepos] = useState<Repository[]>([]);
 
-  // We could add an endpoint to get all repos in the future, 
-  // but for now we just rely on local state to show recently submitted.
+  useEffect(() => {
+    const loadRepositories = async () => {
+      try {
+        const res = await fetch("http://localhost:8000/repositories/");
+        if (!res.ok) {
+          throw new Error("Failed to load repositories");
+        }
+        setRepos(await res.json());
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to load repositories";
+        setStatus(`Error: ${message}`);
+      }
+    };
+
+    loadRepositories();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("HANDLE SUBMIT FIRED", url);
     setLoading(true);
     setStatus("");
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const res = await fetch(`${apiUrl}/repositories/`, {
+      const res = await fetch("http://localhost:8000/repositories/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url })
@@ -39,10 +53,12 @@ export default function Home() {
       setRepos((prev) => [...prev, data]);
       setUrl("");
       setStatus("Repository submitted successfully!");
-    } catch (err: any) {
-      setStatus(`Error: ${err.message}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to submit";
+      setStatus(`Error: ${message}`);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (

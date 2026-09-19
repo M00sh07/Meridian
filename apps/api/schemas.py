@@ -34,6 +34,11 @@ class SymbolResponse(BaseModel):
     
     model_config = ConfigDict(from_attributes=True)
 
+class DependencyResponse(BaseModel):
+    source_file: str
+    target_file: Optional[str] = None
+    imported_module: str
+
 class PaginatedFiles(BaseModel):
     items: List[FileResponse]
     total: int

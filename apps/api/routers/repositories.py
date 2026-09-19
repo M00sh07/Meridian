@@ -4,8 +4,14 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from database import get_db
-from models import Repository, File, Symbol, RepositoryStatus
-from schemas import RepositoryCreate, RepositoryResponse, PaginatedFiles, PaginatedSymbols
+from models import Repository, File, Symbol, Dependency, RepositoryStatus
+from schemas import (
+    RepositoryCreate,
+    RepositoryResponse,
+    DependencyResponse,
+    PaginatedFiles,
+    PaginatedSymbols,
+)
 from services.ingestion_job import process_repository
 
 router = APIRouter(prefix="/repositories", tags=["repositories"])
@@ -48,6 +54,27 @@ def get_repository(repo_id: int, db: Session = Depends(get_db)):
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
     return repo
+
+@router.get("/{repo_id}/dependencies", response_model=List[DependencyResponse])
+def get_repository_dependencies(repo_id: int, db: Session = Depends(get_db)):
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    dependencies = (
+        db.query(Dependency, File.path)
+        .join(File, Dependency.source_file_id == File.id)
+        .filter(File.repository_id == repo_id)
+        .all()
+    )
+    return [
+        {
+            "source_file": source_path,
+            "target_file": dependency.target_file.path if dependency.target_file else None,
+            "imported_module": dependency.imported_module,
+        }
+        for dependency, source_path in dependencies
+    ]
 
 @router.get("/{repo_id}/files", response_model=PaginatedFiles)
 def get_repository_files(
