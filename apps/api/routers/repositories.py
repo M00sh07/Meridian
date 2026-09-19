@@ -10,6 +10,12 @@ from services.ingestion_job import process_repository
 
 router = APIRouter(prefix="/repositories", tags=["repositories"])
 
+@router.get("/", response_model=List[RepositoryResponse])
+def list_repositories(db: Session = Depends(get_db)):
+    return db.query(Repository).order_by(
+        Repository.created_at.desc(), Repository.id.desc()
+    ).all()
+
 @router.post("/", response_model=RepositoryResponse)
 def create_repository(
     repo_in: RepositoryCreate,
