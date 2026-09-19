@@ -7,9 +7,9 @@ from alembic import context
 
 import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
-from apps.api.database import DATABASE_URL
-from apps.api.models import Base
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from database import DATABASE_URL
+from models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

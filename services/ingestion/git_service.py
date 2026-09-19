@@ -27,12 +27,46 @@ def extract_commits(repo_path: str):
         for commit in repository.iter_commits()
     ]
 
+
+def extract_commits_with_changes(repo_path: str):
+    """Return commit metadata and file changes from a cloned repository."""
+    repository = git.Repo(repo_path)
+    commits_data = []
+    for commit in repository.iter_commits():
+        changes = []
+        if commit.parents:
+            # Compare with parent to get changed files
+            diffs = commit.parents[0].diff(commit)
+            for diff in diffs:
+                # diff.change_type: A, M, D, R
+                change_type = diff.change_type
+                # Normalize types
+                if change_type == 'A': change_type = 'added'
+                elif change_type == 'M': change_type = 'modified'
+                elif change_type == 'D': change_type = 'deleted'
+                elif change_type == 'R': change_type = 'renamed'
+
+                path = diff.b_path
+                previous_path = diff.a_path if change_type == 'renamed' else None
+                changes.append({"path": path, "previous_path": previous_path, "type": change_type})
+
+        commits_data.append({
+            "sha": commit.hexsha,
+            "author_name": commit.author.name,
+            "author_email": commit.author.email,
+            "message": commit.message,
+            "committed_at": commit.committed_datetime,
+            "changes": changes
+        })
+    return commits_data
+
+
 def discover_files(repo_path: str) -> List[str]:
     """Discover files, skipping unwanted directories and files."""
     skip_dirs = {'.git', 'node_modules', 'build', 'dist', 'vendor', '__pycache__', '.venv', 'venv'}
     skip_exts = {'.pyc', '.pyo', '.pyd', '.so', '.dll', '.dylib', '.exe', '.bin', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.mp4', '.mp3', '.zip', '.tar', '.gz'}
     max_file_size = 1024 * 1024 # 1 MB
-    
+
     discovered = []
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in skip_dirs]

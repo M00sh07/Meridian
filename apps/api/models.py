@@ -37,6 +37,20 @@ class Commit(Base):
 
     repository = relationship("Repository", back_populates="commits")
 
+
+class CommitFileChange(Base):
+    __tablename__ = "commit_file_changes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    commit_id = Column(Integer, ForeignKey("commits.id"), nullable=False, index=True)
+    file_id = Column(Integer, ForeignKey("files.id"), nullable=True, index=True)
+    path = Column(String, nullable=False)
+    previous_path = Column(String, nullable=True)
+    change_type = Column(String, nullable=False)  # added, modified, deleted, renamed
+
+    commit = relationship("Commit")
+    file = relationship("File")
+
 class File(Base):
     __tablename__ = "files"
 

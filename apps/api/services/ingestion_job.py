@@ -32,6 +32,7 @@ from models import (
     Symbol as DBSymbol,
     Dependency as DBDependency,
     Commit as DBCommit,
+    CommitFileChange as DBCommitFileChange,
     RepositoryStatus,
 )
 
@@ -43,11 +44,11 @@ def process_repository(repo_id: int):
         return
 
     temp_dir = tempfile.mkdtemp()
-    
+
     try:
         repo.status = RepositoryStatus.cloning
         db.commit()
-        
+
         # Clone repo
         clone_repository(repo.url, temp_dir)
 
@@ -55,23 +56,34 @@ def process_repository(repo_id: int):
             commit.sha
             for commit in db.query(DBCommit).filter(DBCommit.repository_id == repo.id).all()
         }
-        for commit in extract_commits(temp_dir):
-            if commit["sha"] in existing_commits:
+        # Store changes for later
+        commit_changes_map = {}
+
+        # Use updated git service method
+        for commit_data in _git_svc.extract_commits_with_changes(temp_dir):
+            if commit_data["sha"] in existing_commits:
                 continue
-            db.add(DBCommit(repository_id=repo.id, **commit))
+
+            changes = commit_data.pop("changes")
+            commit_obj = DBCommit(repository_id=repo.id, **commit_data)
+            db.add(commit_obj)
+            db.flush() # Get ID
+
+            commit_changes_map[commit_obj.sha] = (commit_obj.id, changes)
+
         db.commit()
-        
+
         repo.status = RepositoryStatus.parsing
         db.commit()
-        
+
         # Discover files
         files = discover_files(temp_dir)
-        
+
         db_files = {}
         for file_rel_path in files:
             file_abs_path = os.path.join(temp_dir, file_rel_path)
             lang = detect_language(file_abs_path)
-            
+
             db_file = DBFile(
                 repository_id=repo.id,
                 path=file_rel_path,
@@ -81,7 +93,7 @@ def process_repository(repo_id: int):
             db.commit()
             db.refresh(db_file)
             db_files[file_rel_path.replace(os.sep, '/')] = db_file
-            
+
             if lang:
                 try:
                     symbols = parse_file(file_abs_path)
@@ -114,10 +126,26 @@ def process_repository(repo_id: int):
             except Exception:
                 pass
         db.commit()
-                    
+
+        # Add commit file changes
+        for sha, (commit_id, changes) in commit_changes_map.items():
+            for change in changes:
+                file_path = change["path"].replace(os.sep, '/')
+                # Try to find corresponding DBFile
+                db_file = db_files.get(file_path)
+
+                db.add(DBCommitFileChange(
+                    commit_id=commit_id,
+                    file_id=db_file.id if db_file else None,
+                    path=file_path,
+                    previous_path=change.get("previous_path"),
+                    change_type=change["type"]
+                ))
+        db.commit()
+
         repo.status = RepositoryStatus.completed
         db.commit()
-        
+
     except Exception as e:
         print(f"INGESTION ERROR: {type(e).__name__}: {e}")
         repo.status = RepositoryStatus.failed
