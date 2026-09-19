@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import {
+  Background,
+  Controls,
+  ReactFlow,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
 
 interface Repository {
   id: number;
@@ -25,6 +32,12 @@ interface Symbol {
   file_id: number;
 }
 
+interface Dependency {
+  source_file: string;
+  target_file: string | null;
+  imported_module: string;
+}
+
 export default function RepoExplorer() {
   const params = useParams();
   const id = params.id as string;
@@ -33,7 +46,8 @@ export default function RepoExplorer() {
   const [repo, setRepo] = useState<Repository | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [symbols, setSymbols] = useState<Symbol[]>([]);
-  const [activeTab, setActiveTab] = useState<"files" | "symbols">("files");
+  const [dependencies, setDependencies] = useState<Dependency[]>([]);
+  const [activeTab, setActiveTab] = useState<"files" | "symbols" | "graph">("files");
 
   useEffect(() => {
     const fetchData = async () => {
@@ -52,6 +66,11 @@ export default function RepoExplorer() {
           const sData = await symRes.json();
           setSymbols(sData.items);
         }
+
+        const dependencyRes = await fetch(`${apiUrl}/repositories/${id}/dependencies`);
+        if (dependencyRes.ok) {
+          setDependencies(await dependencyRes.json());
+        }
       } catch (err) {}
     };
     fetchData();
@@ -59,6 +78,31 @@ export default function RepoExplorer() {
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, [id, apiUrl]);
+
+  const graph = useMemo(() => {
+    const filePaths = new Set<string>();
+    const resolvedDependencies = dependencies.filter((dependency) => {
+      if (!dependency.target_file) return false;
+      filePaths.add(dependency.source_file);
+      filePaths.add(dependency.target_file);
+      return true;
+    });
+
+    const nodes: Node[] = Array.from(filePaths).map((path, index) => ({
+      id: path,
+      position: { x: (index % 4) * 240, y: Math.floor(index / 4) * 120 },
+      data: { label: path },
+      style: { background: "#18181b", border: "1px solid #3f3f46", color: "#fff", width: 210 },
+    }));
+    const edges: Edge[] = resolvedDependencies.map((dependency, index) => ({
+      id: `${dependency.source_file}-${dependency.target_file}-${index}`,
+      source: dependency.source_file,
+      target: dependency.target_file as string,
+      animated: false,
+    }));
+
+    return { nodes, edges };
+  }, [dependencies]);
 
   if (!repo) {
     return <div className="p-12 text-white">Loading...</div>;
@@ -94,6 +138,12 @@ export default function RepoExplorer() {
           >
             Symbols ({symbols.length})
           </button>
+          <button
+            className={`font-medium ${activeTab === 'graph' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+            onClick={() => setActiveTab('graph')}
+          >
+            Graph
+          </button>
         </div>
 
         {activeTab === 'files' && (
@@ -125,6 +175,18 @@ export default function RepoExplorer() {
               </div>
             ))}
             {symbols.length === 0 && <p className="text-zinc-500">No symbols found.</p>}
+          </div>
+        )}
+
+        {activeTab === 'graph' && (
+          <div className="h-[600px] w-full rounded border border-zinc-800 bg-zinc-900">
+            <ReactFlow nodes={graph.nodes} edges={graph.edges} fitView>
+              <Background color="#3f3f46" gap={24} />
+              <Controls />
+            </ReactFlow>
+            {graph.nodes.length === 0 && (
+              <p className="p-4 text-zinc-500">No resolved dependencies found.</p>
+            )}
           </div>
         )}
       </div>
