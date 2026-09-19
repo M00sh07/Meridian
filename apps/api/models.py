@@ -21,6 +21,21 @@ class Repository(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     files = relationship("File", back_populates="repository", cascade="all, delete-orphan")
+    commits = relationship("Commit", back_populates="repository", cascade="all, delete-orphan")
+
+
+class Commit(Base):
+    __tablename__ = "commits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    repository_id = Column(Integer, ForeignKey("repositories.id"), nullable=False, index=True)
+    sha = Column(String, nullable=False)
+    author_name = Column(String, nullable=True)
+    author_email = Column(String, nullable=True)
+    message = Column(Text, nullable=False)
+    committed_at = Column(DateTime, nullable=False)
+
+    repository = relationship("Repository", back_populates="commits")
 
 class File(Base):
     __tablename__ = "files"

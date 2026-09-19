@@ -19,6 +19,7 @@ def _load_module(dotted_name: str, rel_path: str):
 _git_svc = _load_module("git_service", "services/ingestion/git_service.py")
 _parser_svc = _load_module("tree_sitter_service", "services/parser/tree_sitter_service.py")
 clone_repository = _git_svc.clone_repository
+extract_commits = _git_svc.extract_commits
 discover_files = _git_svc.discover_files
 detect_language = _parser_svc.detect_language
 parse_file = _parser_svc.parse_file
@@ -30,6 +31,7 @@ from models import (
     File as DBFile,
     Symbol as DBSymbol,
     Dependency as DBDependency,
+    Commit as DBCommit,
     RepositoryStatus,
 )
 
@@ -48,6 +50,16 @@ def process_repository(repo_id: int):
         
         # Clone repo
         clone_repository(repo.url, temp_dir)
+
+        existing_commits = {
+            commit.sha
+            for commit in db.query(DBCommit).filter(DBCommit.repository_id == repo.id).all()
+        }
+        for commit in extract_commits(temp_dir):
+            if commit["sha"] in existing_commits:
+                continue
+            db.add(DBCommit(repository_id=repo.id, **commit))
+        db.commit()
         
         repo.status = RepositoryStatus.parsing
         db.commit()
@@ -107,6 +119,7 @@ def process_repository(repo_id: int):
         db.commit()
         
     except Exception as e:
+        print(f"INGESTION ERROR: {type(e).__name__}: {e}")
         repo.status = RepositoryStatus.failed
         db.commit()
     finally:
