@@ -1,2 +1,13 @@
 fastapi
 uvicorn
+sqlalchemy
+alembic
+psycopg2-binary
+gitpython
+tree-sitter
+tree-sitter-python
+tree-sitter-javascript
+pydantic
+pytest
+pytest-cov
+httpx

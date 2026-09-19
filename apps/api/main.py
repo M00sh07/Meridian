@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from routers import repositories
 
 app = FastAPI(title="Meredian API")
 
@@ -11,6 +12,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(repositories.router)
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
