@@ -1,7 +1,9 @@
 import os
 import shutil
+from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 from database import get_db
 from models import Repository, File, Symbol, Dependency, RepositoryStatus, Commit, CommitFileChange
@@ -15,8 +17,11 @@ from schemas import (
     CommitChangeResponse,
     PaginatedFileCommits,
     FileChurnResponse,
+    FileHotspotResponse,
 )
 from services.ingestion_job import process_repository
+# Git churn is considered "recent" when it falls inside this window.
+HOTSPOT_RECENT_WINDOW_DAYS = 90
 router = APIRouter(prefix="/repositories", tags=["repositories"])
 @router.get("/", response_model=List[RepositoryResponse])
 def list_repositories(db: Session = Depends(get_db)):
@@ -189,3 +194,52 @@ def get_file_churn(
         "deleted_count": counts["deleted"],
         "renamed_count": counts["renamed"],
     }
+
+@router.get("/{repo_id}/hotspots", response_model=List[FileHotspotResponse])
+def get_repository_hotspots(
+    repo_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    recent_cutoff = datetime.utcnow() - timedelta(days=HOTSPOT_RECENT_WINDOW_DAYS)
+
+    rows = (
+        db.query(
+            File.id.label("file_id"),
+            File.path.label("path"),
+            func.count(CommitFileChange.id).label("total_changes"),
+            func.sum(
+                case((Commit.committed_at >= recent_cutoff, 1), else_=0)
+            ).label("recent_changes"),
+            func.max(Commit.committed_at).label("last_changed_at"),
+        )
+        .join(CommitFileChange, CommitFileChange.file_id == File.id)
+        .join(Commit, CommitFileChange.commit_id == Commit.id)
+        .filter(
+            File.repository_id == repo_id,
+            Commit.repository_id == repo_id,
+            CommitFileChange.file_id.isnot(None),
+        )
+        .group_by(File.id, File.path)
+        .order_by(
+            func.count(CommitFileChange.id).desc(),
+            func.max(Commit.committed_at).desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "file_id": row.file_id,
+            "path": row.path,
+            "total_changes": row.total_changes,
+            "recent_changes": row.recent_changes,
+            "last_changed_at": row.last_changed_at,
+        }
+        for row in rows
+    ]

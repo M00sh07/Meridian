@@ -88,3 +88,9 @@ class FileChurnResponse(BaseModel):
     modified_count: int
     deleted_count: int
     renamed_count: int
+class FileHotspotResponse(BaseModel):
+    file_id: int
+    path: str
+    total_changes: int
+    recent_changes: int
+    last_changed_at: Optional[datetime] = None
