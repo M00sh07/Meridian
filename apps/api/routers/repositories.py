@@ -23,6 +23,7 @@ from schemas import (
     EmbeddingResultResponse,
     SearchResponse,
     ContextAssemblyResponse,
+    DependencyImpactResponse,
 )
 from services.ingestion_job import process_repository
 from services.embedding_service import embed_repository_chunks, count_pending_chunks
@@ -369,3 +370,17 @@ def assemble_repository_context(
     )
 
     return context_data
+
+@router.get("/{repo_id}/impact", response_model=DependencyImpactResponse)
+def get_file_impact(
+    repo_id: int,
+    path: str = Query(..., min_length=1),
+    depth: int = Query(1, ge=1, le=10),
+    db: Session = Depends(get_db)
+):
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    from services.impact.dependency_impact import get_dependency_impact
+    return get_dependency_impact(db, repo_id, path, depth)

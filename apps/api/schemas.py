@@ -173,3 +173,22 @@ class ContextAssemblyResponse(BaseModel):
     files: List[ContextFileGroupResponse]
     total_chunks: int
     total_characters: int
+
+class ImpactTarget(BaseModel):
+    file_id: int
+    path: str
+
+class ImpactNode(BaseModel):
+    file_id: int
+    path: str
+    relationship: str
+    depth: int
+
+class DependencyImpactResponse(BaseModel):
+    repository_id: int
+    target: ImpactTarget
+    depth: int
+    direct_dependencies: List[ImpactNode]
+    direct_dependents: List[ImpactNode]
+    affected_files: List[ImpactNode]
+    total_affected: int
