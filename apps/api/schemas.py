@@ -232,3 +232,21 @@ class SymbolImpactResponse(BaseModel):
     file_level_direct_dependents: List[ImpactNode]
     file_level_affected_files: List[ImpactNode]
     file_level_total_affected: int
+
+class RiskFeatures(BaseModel):
+    symbol_count: int
+    function_count: int
+    class_count: int
+
+    direct_dependency_count: int
+    direct_dependent_count: int
+    transitive_affected_file_count: int
+
+    historical_change_count: int
+    recent_change_count: int
+    co_changed_file_count: int
+
+class RiskFeatureResponse(BaseModel):
+    repository_id: int
+    target: ImpactTarget
+    features: RiskFeatures

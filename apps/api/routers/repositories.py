@@ -26,6 +26,7 @@ from schemas import (
     DependencyImpactResponse,
     HistoricalImpactResponse,
     SymbolImpactResponse,
+    RiskFeatureResponse,
 )
 from services.ingestion_job import process_repository
 from services.embedding_service import embed_repository_chunks, count_pending_chunks
@@ -407,3 +408,13 @@ def get_symbol_impact_route(
 ):
     from services.impact.symbol_impact import get_symbol_impact
     return get_symbol_impact(db, repo_id, path, symbol, depth)
+
+@router.get("/{repo_id}/risk/features", response_model=RiskFeatureResponse)
+def get_risk_features_route(
+    repo_id: int,
+    path: str = Query(..., min_length=1),
+    depth: int = Query(1, ge=1, le=10),
+    db: Session = Depends(get_db)
+):
+    from services.risk.feature_extraction import get_risk_features
+    return get_risk_features(db, repo_id, path, depth)
