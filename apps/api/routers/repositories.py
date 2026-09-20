@@ -24,6 +24,7 @@ from schemas import (
     SearchResponse,
     ContextAssemblyResponse,
     DependencyImpactResponse,
+    HistoricalImpactResponse,
 )
 from services.ingestion_job import process_repository
 from services.embedding_service import embed_repository_chunks, count_pending_chunks
@@ -384,3 +385,13 @@ def get_file_impact(
 
     from services.impact.dependency_impact import get_dependency_impact
     return get_dependency_impact(db, repo_id, path, depth)
+
+@router.get("/{repo_id}/history/impact", response_model=HistoricalImpactResponse)
+def get_historical_impact_route(
+    repo_id: int,
+    path: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    from services.history.change_history import get_historical_impact
+    return get_historical_impact(db, repo_id, path, limit)

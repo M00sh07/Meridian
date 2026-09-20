@@ -192,3 +192,25 @@ class DependencyImpactResponse(BaseModel):
     direct_dependents: List[ImpactNode]
     affected_files: List[ImpactNode]
     total_affected: int
+
+class HistoryCommit(BaseModel):
+    sha: str
+    author_name: Optional[str] = None
+    message: str
+    committed_at: datetime
+    change_type: str
+    previous_path: Optional[str] = None
+
+class CoChangeNode(BaseModel):
+    file_id: int
+    path: str
+    shared_commits: int
+
+class HistoricalImpactResponse(BaseModel):
+    repository_id: int
+    target: ImpactTarget
+    total_changes: int
+    first_commit_date: Optional[datetime] = None
+    last_commit_date: Optional[datetime] = None
+    recent_commits: List[HistoryCommit]
+    co_changes: List[CoChangeNode]
