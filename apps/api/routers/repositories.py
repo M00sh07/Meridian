@@ -14,6 +14,7 @@ from schemas import (
     PaginatedCommits,
     CommitChangeResponse,
     PaginatedFileCommits,
+    FileChurnResponse,
 )
 from services.ingestion_job import process_repository
 router = APIRouter(prefix="/repositories", tags=["repositories"])
@@ -150,3 +151,41 @@ def get_file_commits(
     items = query.offset((page - 1) * limit).limit(limit).all()
 
     return {"items": items, "total": total, "page": page, "limit": limit}
+@router.get("/{repo_id}/files/{file_id}/churn", response_model=FileChurnResponse)
+def get_file_churn(
+    repo_id: int,
+    file_id: int,
+    db: Session = Depends(get_db)
+):
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    file = db.query(File).filter(File.id == file_id, File.repository_id == repo_id).first()
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found in this repository")
+
+    changes = (
+        db.query(CommitFileChange)
+        .join(Commit, CommitFileChange.commit_id == Commit.id)
+        .filter(
+            Commit.repository_id == repo_id,
+            CommitFileChange.file_id == file_id,
+        )
+        .all()
+    )
+
+    counts = {"added": 0, "modified": 0, "deleted": 0, "renamed": 0}
+    for change in changes:
+        if change.change_type in counts:
+            counts[change.change_type] += 1
+
+    return {
+        "file_id": file.id,
+        "path": file.path,
+        "total_changes": len(changes),
+        "added_count": counts["added"],
+        "modified_count": counts["modified"],
+        "deleted_count": counts["deleted"],
+        "renamed_count": counts["renamed"],
+    }

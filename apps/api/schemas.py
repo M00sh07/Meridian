@@ -80,3 +80,11 @@ class PaginatedFileCommits(BaseModel):
     total: int
     page: int
     limit: int
+class FileChurnResponse(BaseModel):
+    file_id: int
+    path: str
+    total_changes: int
+    added_count: int
+    modified_count: int
+    deleted_count: int
+    renamed_count: int
