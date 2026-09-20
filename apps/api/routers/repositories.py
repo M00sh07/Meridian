@@ -13,6 +13,7 @@ from schemas import (
     PaginatedSymbols,
     PaginatedCommits,
     CommitChangeResponse,
+    PaginatedFileCommits,
 )
 from services.ingestion_job import process_repository
 router = APIRouter(prefix="/repositories", tags=["repositories"])
@@ -71,8 +72,8 @@ def get_repository_dependencies(repo_id: int, db: Session = Depends(get_db)):
     ]
 @router.get("/{repo_id}/files", response_model=PaginatedFiles)
 def get_repository_files(
-    repo_id: int, 
-    page: int = Query(1, ge=1), 
+    repo_id: int,
+    page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
@@ -82,8 +83,8 @@ def get_repository_files(
     return {"items": items, "total": total, "page": page, "size": size}
 @router.get("/{repo_id}/symbols", response_model=PaginatedSymbols)
 def get_repository_symbols(
-    repo_id: int, 
-    page: int = Query(1, ge=1), 
+    repo_id: int,
+    page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
@@ -120,3 +121,32 @@ def get_commit_changes(
         raise HTTPException(status_code=404, detail="Commit not found in this repository")
     changes = db.query(CommitFileChange).filter(CommitFileChange.commit_id == commit.id).all()
     return changes
+
+@router.get("/{repo_id}/files/{file_id}/commits", response_model=PaginatedFileCommits)
+def get_file_commits(
+    repo_id: int,
+    file_id: int,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    file = db.query(File).filter(File.id == file_id, File.repository_id == repo_id).first()
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found in this repository")
+
+    # Query commits that changed this file
+    query = (
+        db.query(Commit)
+        .join(CommitFileChange)
+        .filter(CommitFileChange.file_id == file_id)
+        .order_by(Commit.committed_at.desc())
+    )
+
+    total = query.count()
+    items = query.offset((page - 1) * limit).limit(limit).all()
+
+    return {"items": items, "total": total, "page": page, "limit": limit}

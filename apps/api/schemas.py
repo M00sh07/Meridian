@@ -12,7 +12,7 @@ class RepositoryResponse(BaseModel):
     status: RepositoryStatus
     created_at: datetime
     updated_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 class FileResponse(BaseModel):
@@ -20,7 +20,7 @@ class FileResponse(BaseModel):
     repository_id: int
     path: str
     language: Optional[str] = None
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 class SymbolResponse(BaseModel):
@@ -31,7 +31,7 @@ class SymbolResponse(BaseModel):
     signature: Optional[str] = None
     start_line: int
     end_line: int
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 class DependencyResponse(BaseModel):
@@ -70,6 +70,12 @@ class CommitResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class PaginatedCommits(BaseModel):
+    items: List[CommitResponse]
+    total: int
+    page: int
+    limit: int
+
+class PaginatedFileCommits(BaseModel):
     items: List[CommitResponse]
     total: int
     page: int
