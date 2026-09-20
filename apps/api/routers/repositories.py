@@ -4,7 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from database import get_db
-from models import Repository, File, Symbol, Dependency, RepositoryStatus, Commit
+from models import Repository, File, Symbol, Dependency, RepositoryStatus, Commit, CommitFileChange
 from schemas import (
     RepositoryCreate,
     RepositoryResponse,
@@ -12,6 +12,7 @@ from schemas import (
     PaginatedFiles,
     PaginatedSymbols,
     PaginatedCommits,
+    CommitChangeResponse,
 )
 from services.ingestion_job import process_repository
 
@@ -116,4 +117,22 @@ def get_repository_commits(
     query = db.query(Commit).filter(Commit.repository_id == repo_id).order_by(Commit.committed_at.desc())
     total = query.count()
     items = query.offset((page - 1) * limit).limit(limit).all()
+
+@router.get("/{repo_id}/commits/{sha}/changes", response_model=List[CommitChangeResponse])
+def get_commit_changes(
+    repo_id: int,
+    sha: str,
+    db: Session = Depends(get_db)
+):
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    commit = db.query(Commit).filter(Commit.repository_id == repo_id, Commit.sha == sha).first()
+    if not commit:
+        raise HTTPException(status_code=404, detail="Commit not found in this repository")
+
+    changes = db.query(CommitFileChange).filter(CommitFileChange.commit_id == commit.id).all()
+    return changes
+
     return {"items": items, "total": total, "page": page, "limit": limit}

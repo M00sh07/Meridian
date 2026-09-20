@@ -51,6 +51,15 @@ class PaginatedSymbols(BaseModel):
     page: int
     size: int
 
+
+class CommitChangeResponse(BaseModel):
+    path: str
+    previous_path: Optional[str] = None
+    change_type: str
+    file_id: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
 class CommitResponse(BaseModel):
     sha: str
     author_name: Optional[str] = None
