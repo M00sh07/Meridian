@@ -27,3 +27,6 @@ Thumbs.db
 # Local Development
 .vscode/
 *.db
+
+# Coding Agent
+.kilo/

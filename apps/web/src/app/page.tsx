@@ -1,9 +1,14 @@
 "use client";
-
-import { useEffect, useState } from "react";
+import * as React from "react";
+import { motion } from "motion/react";
 import Link from "next/link";
+import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { MerLabel } from "@/components/meredian/label";
+import { MerStat } from "@/components/meredian/stat";
+import { Search, GitBranch, Folder, Clock, Hash, FileText } from "lucide-react";
 
-interface Repository {
+interface Repo {
   id: number;
   url: string;
   status: string;
@@ -11,95 +16,139 @@ interface Repository {
   updated_at: string;
 }
 
-export default function Home() {
-  const [url, setUrl] = useState("");
-  const [status, setStatus] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [repos, setRepos] = useState<Repository[]>([]);
+function RepoRow({ repo, index }: { repo: Repo; index: number }) {
+  const statusTone = repo.status === "completed" ? "cyan" : repo.status === "failed" ? "magenta" : "amber";
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, delay: index * 0.04 }}
+    >
+      <Link
+        href={`/repo/${repo.id}`}
+        className={cn(
+          "group flex items-center gap-4 px-4 py-3 border-b border-white/5 hover:bg-white/[0.02] transition-colors",
+          "hover:border-mer-amber/20"
+        )}
+      >
+        <div className="flex items-center justify-center w-9 h-9 rounded-sm bg-graphite-800 border border-white/5 group-hover:border-mer-amber/30">
+          <GitBranch size={16} className="text-white/40 group-hover:text-mer-amber" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-mono text-sm text-white/90 truncate group-hover:text-white">
+            {repo.url.replace("https://github.com/", "")}
+          </div>
+          <div className="text-[11px] text-white/30 font-mono mt-0.5">
+            {repo.url}
+          </div>
+        </div>
+        <div className="flex items-center gap-4 text-[11px] font-mono text-white/40">
+          <span className={cn("px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider", statusTone === "cyan" && "text-mer-cyan", statusTone === "amber" && "text-mer-amber", statusTone === "magenta" && "text-mer-magenta")}>
+            {repo.status}
+          </span>
+          <span className="hidden sm:inline">{new Date(repo.created_at).toLocaleDateString()}</span>
+        </div>
+      </Link>
+    </motion.div>
+  );
+}
 
-  useEffect(() => {
-    const loadRepositories = async () => {
+export default function Home() {
+  const [url, setUrl] = React.useState("");
+  const [status, setStatus] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [repos, setRepos] = React.useState<Repo[]>([]);
+
+  React.useEffect(() => {
+    const load = async () => {
       try {
-        const res = await fetch("http://localhost:8000/repositories/");
-        if (!res.ok) {
-          throw new Error("Failed to load repositories");
-        }
-        setRepos(await res.json());
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to load repositories";
-        setStatus(`Error: ${message}`);
+        const data = await api.listRepositories();
+        setRepos(data);
+      } catch {
+        setStatus("Error: Failed to load repositories");
       }
     };
-
-    loadRepositories();
+    load();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("HANDLE SUBMIT FIRED", url);
     setLoading(true);
     setStatus("");
     try {
-      const res = await fetch("http://localhost:8000/repositories/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url })
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || "Failed to submit");
-      }
-      const data = await res.json();
-      setRepos((prev) => [...prev, data]);
+      const data = await api.createRepository(url);
+      setRepos((prev) => [data, ...prev]);
       setUrl("");
-      setStatus("Repository submitted successfully!");
+      setStatus("Repository submitted for analysis.");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to submit";
-      setStatus(`Error: ${message}`);
+      setStatus(err instanceof Error ? err.message : "Failed to submit");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-start p-12 bg-zinc-950 text-white">
-      <h1 className="text-4xl font-bold mb-8 tracking-tighter">Meredian Explorer</h1>
-      
-      <form onSubmit={handleSubmit} className="w-full max-w-lg mb-8 bg-zinc-900 p-6 rounded-lg shadow-xl border border-zinc-800">
-        <label className="block mb-2 text-sm font-medium text-zinc-300">Submit GitHub URL</label>
-        <div className="flex gap-4">
-          <input 
-            type="text" 
-            required 
-            placeholder="https://github.com/owner/repo" 
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            className="flex-1 bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block w-full p-2.5"
-          />
-          <button 
-            type="submit" 
-            disabled={loading}
-            className="text-white bg-emerald-600 hover:bg-emerald-700 font-medium rounded-lg text-sm px-5 py-2.5"
-          >
-            {loading ? "Submitting..." : "Ingest"}
-          </button>
-        </div>
-        {status && <p className="mt-4 text-sm text-amber-400">{status}</p>}
-      </form>
-
-      {repos.length > 0 && (
-        <div className="w-full max-w-lg">
-          <h2 className="text-xl font-bold mb-4">Recent Repositories</h2>
-          <div className="flex flex-col gap-3">
-            {repos.map(repo => (
-              <Link href={`/repo/${repo.id}`} key={repo.id} className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg hover:border-emerald-500 transition-colors">
-                <p className="font-semibold">{repo.url}</p>
-                <p className="text-sm text-zinc-400 mt-1">Status: <span className="text-zinc-200">{repo.status}</span></p>
-              </Link>
-            ))}
+    <div className="min-h-screen mer-bg">
+      <nav className="border-b border-white/5 bg-graphite-950/40">
+        <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-sm bg-mer-amber/10 border border-mer-amber/30 flex items-center justify-center">
+              <span className="text-mer-amber font-mono text-xs font-bold">M</span>
+            </div>
+            <span className="text-sm font-semibold tracking-tight text-white/90">Meredian</span>
+          </Link>
+          <div className="flex items-center gap-4 text-[11px] font-mono text-white/40">
+            <span>Repository Intelligence</span>
           </div>
         </div>
-      )}
-    </main>
+      </nav>
+
+      <main className="max-w-6xl mx-auto px-6 py-16">
+        <div className="mb-12">
+          <MerLabel tone="amber" className="mb-3">Entry Point</MerLabel>
+          <h1 className="text-4xl font-bold tracking-tight text-white mb-3">
+            Repository Intelligence
+          </h1>
+          <p className="text-white/50 text-sm max-w-xl">
+            Understand an unfamiliar codebase before you change it.
+          </p>
+        </div>
+
+        <div className="mb-12">
+          <form onSubmit={handleSubmit} className="flex gap-3">
+            <input
+              type="text"
+              required
+              placeholder="https://github.com/owner/repo"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              className="flex-1 bg-graphite-900/60 border border-white/10 text-white text-sm px-4 py-2.5 rounded-sm focus:outline-none focus:border-mer-amber/40 font-mono placeholder:text-white/25"
+            />
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-5 py-2.5 bg-mer-amber/90 hover:bg-mer-amber text-black text-sm font-medium rounded-sm disabled:opacity-50"
+            >
+              {loading ? "Analyzing…" : "Ingest"}
+            </button>
+          </form>
+          {status && <p className="mt-3 text-xs text-mer-amber font-mono">{status}</p>}
+        </div>
+
+        {repos.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <MerLabel>Recent Repositories</MerLabel>
+              <span className="text-[10px] font-mono text-white/25">{repos.length} analyzed</span>
+            </div>
+            <div className="border border-white/5 bg-graphite-950/40">
+              {repos.map((repo, i) => (
+                <RepoRow key={repo.id} repo={repo} index={i} />
+              ))}
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
   );
 }
