@@ -214,3 +214,21 @@ class HistoricalImpactResponse(BaseModel):
     last_commit_date: Optional[datetime] = None
     recent_commits: List[HistoryCommit]
     co_changes: List[CoChangeNode]
+
+class SymbolImpactTarget(BaseModel):
+    file_id: int
+    path: str
+    symbol_id: int
+    symbol_name: str
+    symbol_type: str
+    start_line: int
+    end_line: int
+
+class SymbolImpactResponse(BaseModel):
+    repository_id: int
+    target_symbol: SymbolImpactTarget
+    depth: int
+    file_level_direct_dependencies: List[ImpactNode]
+    file_level_direct_dependents: List[ImpactNode]
+    file_level_affected_files: List[ImpactNode]
+    file_level_total_affected: int
