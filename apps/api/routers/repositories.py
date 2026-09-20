@@ -15,15 +15,12 @@ from schemas import (
     CommitChangeResponse,
 )
 from services.ingestion_job import process_repository
-
 router = APIRouter(prefix="/repositories", tags=["repositories"])
-
 @router.get("/", response_model=List[RepositoryResponse])
 def list_repositories(db: Session = Depends(get_db)):
     return db.query(Repository).order_by(
         Repository.created_at.desc(), Repository.id.desc()
     ).all()
-
 @router.post("/", response_model=RepositoryResponse)
 def create_repository(
     repo_in: RepositoryCreate,
@@ -32,7 +29,6 @@ def create_repository(
 ):
     if not repo_in.url.startswith("https://github.com/"):
         raise HTTPException(status_code=400, detail="Only HTTPS GitHub URLs are supported.")
-
     # Check if exists
     repo = db.query(Repository).filter(Repository.url == repo_in.url).first()
     if repo:
@@ -46,23 +42,19 @@ def create_repository(
         db.add(repo)
         db.commit()
         db.refresh(repo)
-
     background_tasks.add_task(process_repository, repo.id)
     return repo
-
 @router.get("/{repo_id}", response_model=RepositoryResponse)
 def get_repository(repo_id: int, db: Session = Depends(get_db)):
     repo = db.query(Repository).filter(Repository.id == repo_id).first()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
     return repo
-
 @router.get("/{repo_id}/dependencies", response_model=List[DependencyResponse])
 def get_repository_dependencies(repo_id: int, db: Session = Depends(get_db)):
     repo = db.query(Repository).filter(Repository.id == repo_id).first()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
-
     dependencies = (
         db.query(Dependency, File.path)
         .join(File, Dependency.source_file_id == File.id)
@@ -77,7 +69,6 @@ def get_repository_dependencies(repo_id: int, db: Session = Depends(get_db)):
         }
         for dependency, source_path in dependencies
     ]
-
 @router.get("/{repo_id}/files", response_model=PaginatedFiles)
 def get_repository_files(
     repo_id: int, 
@@ -89,7 +80,6 @@ def get_repository_files(
     total = query.count()
     items = query.offset((page - 1) * size).limit(size).all()
     return {"items": items, "total": total, "page": page, "size": size}
-
 @router.get("/{repo_id}/symbols", response_model=PaginatedSymbols)
 def get_repository_symbols(
     repo_id: int, 
@@ -102,7 +92,6 @@ def get_repository_symbols(
     total = query.count()
     items = query.offset((page - 1) * size).limit(size).all()
     return {"items": items, "total": total, "page": page, "size": size}
-
 @router.get("/{repo_id}/commits", response_model=PaginatedCommits)
 def get_repository_commits(
     repo_id: int,
@@ -113,11 +102,10 @@ def get_repository_commits(
     repo = db.query(Repository).filter(Repository.id == repo_id).first()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
-
     query = db.query(Commit).filter(Commit.repository_id == repo_id).order_by(Commit.committed_at.desc())
     total = query.count()
     items = query.offset((page - 1) * limit).limit(limit).all()
-
+    return {"items": items, "total": total, "page": page, "limit": limit}
 @router.get("/{repo_id}/commits/{sha}/changes", response_model=List[CommitChangeResponse])
 def get_commit_changes(
     repo_id: int,
@@ -127,12 +115,8 @@ def get_commit_changes(
     repo = db.query(Repository).filter(Repository.id == repo_id).first()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
-
     commit = db.query(Commit).filter(Commit.repository_id == repo_id, Commit.sha == sha).first()
     if not commit:
         raise HTTPException(status_code=404, detail="Commit not found in this repository")
-
     changes = db.query(CommitFileChange).filter(CommitFileChange.commit_id == commit.id).all()
     return changes
-
-    return {"items": items, "total": total, "page": page, "limit": limit}
