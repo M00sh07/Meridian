@@ -3,6 +3,8 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
+from vector_type import build_vector_type
+from services.embedding_config import get_dimension
 
 class RepositoryStatus(str, enum.Enum):
     pending = "pending"
@@ -114,6 +116,14 @@ class Chunk(Base):
     end_line = Column(Integer, nullable=True)
     content = Column(Text, nullable=False)
     content_hash = Column(String, nullable=False)
+    # Embedding state. `embedding` holds the vector; `embedded_content_hash`
+    # records which content hash that vector was computed from, so re-embedding
+    # is skipped when content has not changed.
+    embedding = Column(build_vector_type(get_dimension()), nullable=True)
+    embedding_model = Column(String, nullable=True)
+    embedding_dimension = Column(Integer, nullable=True)
+    embedded_content_hash = Column(String, nullable=True, index=True)
+    embedded_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

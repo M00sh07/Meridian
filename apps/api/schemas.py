@@ -115,3 +115,19 @@ class PaginatedChunks(BaseModel):
     total: int
     page: int
     limit: int
+class EmbeddingStatusResponse(BaseModel):
+    repository_id: int
+    total_chunks: int
+    embedded_chunks: int
+    pending_chunks: int
+    model: str
+    dimension: int
+class EmbeddingResultResponse(BaseModel):
+    repository_id: int
+    total_chunks: int
+    embedded: int
+    skipped: int
+    failed: int
+    model: str
+    dimension: int
+    errors: List[str]

@@ -8,6 +8,8 @@ tree-sitter
 tree-sitter-python
 tree-sitter-javascript
 pydantic
+pgvector
+sentence-transformers
 pytest
 pytest-cov
 httpx

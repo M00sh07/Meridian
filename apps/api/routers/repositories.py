@@ -19,8 +19,12 @@ from schemas import (
     FileChurnResponse,
     FileHotspotResponse,
     PaginatedChunks,
+    EmbeddingStatusResponse,
+    EmbeddingResultResponse,
 )
 from services.ingestion_job import process_repository
+from services.embedding_service import embed_repository_chunks, count_pending_chunks
+from services.embedding_config import get_dimension, get_model_name
 # Git churn is considered "recent" when it falls inside this window.
 HOTSPOT_RECENT_WINDOW_DAYS = 90
 router = APIRouter(prefix="/repositories", tags=["repositories"])
@@ -267,3 +271,35 @@ def get_repository_chunks(
     total = query.count()
     items = query.offset((page - 1) * limit).limit(limit).all()
     return {"items": items, "total": total, "page": page, "limit": limit}
+
+@router.get("/{repo_id}/embeddings", response_model=EmbeddingStatusResponse)
+def get_repository_embedding_status(repo_id: int, db: Session = Depends(get_db)):
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    total = db.query(Chunk).filter(Chunk.repository_id == repo_id).count()
+    pending = count_pending_chunks(db, repo_id)
+    return {
+        "repository_id": repo_id,
+        "total_chunks": total,
+        "embedded_chunks": total - pending,
+        "pending_chunks": pending,
+        "model": get_model_name(),
+        "dimension": get_dimension(),
+    }
+
+@router.post("/{repo_id}/embeddings", response_model=EmbeddingResultResponse)
+def create_repository_embeddings(
+    repo_id: int,
+    force: bool = Query(False),
+    db: Session = Depends(get_db)
+):
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    try:
+        return embed_repository_chunks(db, repo_id, force=force)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Embedding provider unavailable: {exc}")
