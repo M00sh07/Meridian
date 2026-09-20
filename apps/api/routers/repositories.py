@@ -22,6 +22,7 @@ from schemas import (
     EmbeddingStatusResponse,
     EmbeddingResultResponse,
     SearchResponse,
+    ContextAssemblyResponse,
 )
 from services.ingestion_job import process_repository
 from services.embedding_service import embed_repository_chunks, count_pending_chunks
@@ -337,3 +338,34 @@ def search_repository(
         "results": results,
         "total": total
     }
+
+@router.get("/{repo_id}/context", response_model=ContextAssemblyResponse)
+def assemble_repository_context(
+    repo_id: int,
+    q: str = Query(..., min_length=1),
+    mode: str = Query("hybrid", pattern="^(semantic|lexical|hybrid)$"),
+    limit: int = Query(50, ge=1, le=100),
+    budget: Optional[int] = Query(None, ge=1),
+    chunk_type: Optional[str] = Query(None),
+    language: Optional[str] = Query(None),
+    path: Optional[str] = Query(None),
+    symbol_name: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    q = q.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Query cannot be blank")
+
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    from services.context.assembler import assemble_context
+
+    # We reuse the hybrid search engine under the hood
+    context_data = assemble_context(
+        db, repo_id, q, mode, limit, budget,
+        chunk_type, language, path, symbol_name
+    )
+
+    return context_data

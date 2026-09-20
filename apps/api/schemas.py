@@ -150,3 +150,26 @@ class SearchResponse(BaseModel):
     query: str
     results: List[SearchResultResponse]
     total: int
+
+class ContextChunkResponse(BaseModel):
+    chunk_id: int
+    chunk_type: str
+    symbol_name: Optional[str] = None
+    language: Optional[str] = None
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
+    content: str
+    score: float
+    semantic_score: float
+    lexical_score: float
+
+class ContextFileGroupResponse(BaseModel):
+    path: str
+    chunks: List[ContextChunkResponse]
+
+class ContextAssemblyResponse(BaseModel):
+    query: str
+    repository_id: int
+    files: List[ContextFileGroupResponse]
+    total_chunks: int
+    total_characters: int
