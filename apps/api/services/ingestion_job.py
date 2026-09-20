@@ -79,20 +79,34 @@ def process_repository(repo_id: int):
         # Discover files
         files = discover_files(temp_dir)
 
+        # Reuse File rows already stored for this repository so that re-ingesting
+        # the same repository does not duplicate files, symbols or dependencies.
+        existing_files = {
+            file.path: file
+            for file in db.query(DBFile).filter(DBFile.repository_id == repo.id).all()
+        }
+
         db_files = {}
         for file_rel_path in files:
             file_abs_path = os.path.join(temp_dir, file_rel_path)
+            normalized_path = file_rel_path.replace(os.sep, '/')
+
+            existing_file = existing_files.get(normalized_path)
+            if existing_file:
+                # Already ingested; keep the row and skip re-parsing it.
+                db_files[normalized_path] = existing_file
+                continue
             lang = detect_language(file_abs_path)
 
             db_file = DBFile(
                 repository_id=repo.id,
-                path=file_rel_path,
+                path=normalized_path,
                 language=lang
             )
             db.add(db_file)
             db.commit()
             db.refresh(db_file)
-            db_files[file_rel_path.replace(os.sep, '/')] = db_file
+            db_files[normalized_path] = db_file
 
             if lang:
                 try:
@@ -113,7 +127,7 @@ def process_repository(repo_id: int):
                     pass
 
         for file_rel_path, db_file in db_files.items():
-            file_abs_path = os.path.join(temp_dir, file_rel_path)
+            file_abs_path = os.path.join(temp_dir, file_rel_path.replace('/', os.sep))
             try:
                 imports = extract_imports(file_abs_path)
                 for imported_module in imports:

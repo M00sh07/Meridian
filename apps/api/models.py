@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -26,6 +26,9 @@ class Repository(Base):
 
 class Commit(Base):
     __tablename__ = "commits"
+    __table_args__ = (
+        UniqueConstraint("repository_id", "sha", name="uq_commits_repository_id_sha"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     repository_id = Column(Integer, ForeignKey("repositories.id"), nullable=False, index=True)

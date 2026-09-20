@@ -13,6 +13,15 @@ def clone_repository(url: str, dest_dir: str):
     git.Repo.clone_from(url, dest_dir)
 
 
+def _iter_commits(repository):
+    try:
+        return list(repository.iter_commits())
+    except (ValueError, git.BadName):
+        # A repository with no commits has an unborn HEAD, so iter_commits()
+        # raises instead of yielding nothing. Treat that as empty history.
+        return []
+
+
 def extract_commits(repo_path: str):
     """Return commit metadata from a cloned repository."""
     repository = git.Repo(repo_path)
@@ -24,7 +33,7 @@ def extract_commits(repo_path: str):
             "message": commit.message,
             "committed_at": commit.committed_datetime,
         }
-        for commit in repository.iter_commits()
+        for commit in _iter_commits(repository)
     ]
 
 
@@ -32,7 +41,7 @@ def extract_commits_with_changes(repo_path: str):
     """Return commit metadata and file changes from a cloned repository."""
     repository = git.Repo(repo_path)
     commits_data = []
-    for commit in repository.iter_commits():
+    for commit in _iter_commits(repository):
         changes = []
         if commit.parents:
             # Compare with parent to get changed files
