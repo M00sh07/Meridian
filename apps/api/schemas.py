@@ -131,3 +131,19 @@ class EmbeddingResultResponse(BaseModel):
     model: str
     dimension: int
     errors: List[str]
+
+class SearchResultResponse(BaseModel):
+    chunk_id: int
+    path: str
+    chunk_type: str
+    symbol_name: Optional[str] = None
+    language: Optional[str] = None
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
+    content: str
+    similarity: float
+
+class SearchResponse(BaseModel):
+    query: str
+    results: List[SearchResultResponse]
+    total: int

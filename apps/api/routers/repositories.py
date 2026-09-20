@@ -21,6 +21,7 @@ from schemas import (
     PaginatedChunks,
     EmbeddingStatusResponse,
     EmbeddingResultResponse,
+    SearchResponse,
 )
 from services.ingestion_job import process_repository
 from services.embedding_service import embed_repository_chunks, count_pending_chunks
@@ -303,3 +304,108 @@ def create_repository_embeddings(
         return embed_repository_chunks(db, repo_id, force=force)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Embedding provider unavailable: {exc}")
+
+@router.get("/{repo_id}/search", response_model=SearchResponse)
+def search_repository(
+    repo_id: int,
+    q: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=50),
+    chunk_type: Optional[str] = Query(None),
+    language: Optional[str] = Query(None),
+    path: Optional[str] = Query(None),
+    symbol_name: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    q = q.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Query cannot be blank")
+
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    from services.embedding_provider import get_provider
+    import math
+
+    provider = get_provider()
+    try:
+        query_vector = provider.embed([q])[0]
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Embedding provider unavailable: {exc}")
+
+    base_query = db.query(Chunk).filter(
+        Chunk.repository_id == repo_id,
+        Chunk.embedding.isnot(None)
+    )
+
+    if chunk_type:
+        base_query = base_query.filter(Chunk.chunk_type == chunk_type)
+    if language:
+        base_query = base_query.filter(Chunk.language == language)
+    if path:
+        base_query = base_query.filter(Chunk.path == path)
+    if symbol_name:
+        base_query = base_query.filter(Chunk.symbol_name == symbol_name)
+
+    results = []
+
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        distance = Chunk.embedding.op('<=>')(list(query_vector))
+        db_results = base_query.add_columns(
+            (1.0 - distance).label('similarity')
+        ).order_by(distance).limit(limit).all()
+
+        for chunk, sim in db_results:
+            results.append({
+                "chunk_id": chunk.id,
+                "path": chunk.path,
+                "chunk_type": chunk.chunk_type,
+                "symbol_name": chunk.symbol_name,
+                "language": chunk.language,
+                "start_line": chunk.start_line,
+                "end_line": chunk.end_line,
+                "content": chunk.content,
+                "similarity": sim
+            })
+    else:
+        all_chunks = base_query.all()
+        scored_chunks = []
+
+        def cosine_sim(v1, v2):
+            dot = sum(a * b for a, b in zip(v1, v2))
+            norm1 = math.sqrt(sum(a * a for a in v1))
+            norm2 = math.sqrt(sum(b * b for b in v2))
+            if norm1 == 0 or norm2 == 0:
+                return 0.0
+            return dot / (norm1 * norm2)
+
+        for chunk in all_chunks:
+            if not chunk.embedding:
+                continue
+            sim = cosine_sim(list(query_vector), chunk.embedding)
+            scored_chunks.append((sim, chunk))
+
+        scored_chunks.sort(key=lambda x: x[0], reverse=True)
+        scored_chunks = scored_chunks[:limit]
+
+        for sim, chunk in scored_chunks:
+            results.append({
+                "chunk_id": chunk.id,
+                "path": chunk.path,
+                "chunk_type": chunk.chunk_type,
+                "symbol_name": chunk.symbol_name,
+                "language": chunk.language,
+                "start_line": chunk.start_line,
+                "end_line": chunk.end_line,
+                "content": chunk.content,
+                "similarity": sim
+            })
+
+    total = base_query.count()
+
+    return {
+        "query": q,
+        "results": results,
+        "total": total
+    }
