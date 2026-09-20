@@ -142,6 +142,9 @@ class SearchResultResponse(BaseModel):
     end_line: Optional[int] = None
     content: str
     similarity: float
+    score: Optional[float] = None
+    semantic_score: Optional[float] = None
+    lexical_score: Optional[float] = None
 
 class SearchResponse(BaseModel):
     query: str

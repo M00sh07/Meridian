@@ -220,7 +220,7 @@ def test_limit_validation(test_data, mock_embedding_provider):
     response = client.get(f"/repositories/{repo_id}/search?q=test&limit=2")
     data = response.json()
     assert len(data["results"]) == 2
-    assert data["total"] == 3  # total is 3 matching chunks for this repo
+    assert data["total"] == 4  # total is 4 matching chunks for this repo in hybrid mode
 
 def test_no_embeddings(test_data, mock_embedding_provider):
     # delete all embeddings in repo 1
