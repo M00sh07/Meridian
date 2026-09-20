@@ -23,3 +23,7 @@ venv.bak/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local Development
+.vscode/
+*.db
