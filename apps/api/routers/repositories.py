@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 from database import get_db
-from models import Repository, File, Symbol, Dependency, RepositoryStatus, Commit, CommitFileChange
+from models import Repository, File, Symbol, Dependency, RepositoryStatus, Commit, CommitFileChange, Chunk
 from schemas import (
     RepositoryCreate,
     RepositoryResponse,
@@ -18,6 +18,7 @@ from schemas import (
     PaginatedFileCommits,
     FileChurnResponse,
     FileHotspotResponse,
+    PaginatedChunks,
 )
 from services.ingestion_job import process_repository
 # Git churn is considered "recent" when it falls inside this window.
@@ -243,3 +244,26 @@ def get_repository_hotspots(
         }
         for row in rows
     ]
+
+@router.get("/{repo_id}/chunks", response_model=PaginatedChunks)
+def get_repository_chunks(
+    repo_id: int,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=100),
+    chunk_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    query = db.query(Chunk).filter(Chunk.repository_id == repo_id)
+    if chunk_type is not None:
+        query = query.filter(Chunk.chunk_type == chunk_type)
+
+    # Deterministic ordering so paging is stable across requests.
+    query = query.order_by(Chunk.path, Chunk.start_line, Chunk.id)
+
+    total = query.count()
+    items = query.offset((page - 1) * limit).limit(limit).all()
+    return {"items": items, "total": total, "page": page, "limit": limit}

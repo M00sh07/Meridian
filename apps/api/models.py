@@ -22,6 +22,7 @@ class Repository(Base):
 
     files = relationship("File", back_populates="repository", cascade="all, delete-orphan")
     commits = relationship("Commit", back_populates="repository", cascade="all, delete-orphan")
+    chunks = relationship("Chunk", back_populates="repository", cascade="all, delete-orphan")
 
 
 class Commit(Base):
@@ -90,6 +91,35 @@ class Symbol(Base):
 
     file = relationship("File", back_populates="symbols")
 
+
+class Chunk(Base):
+    __tablename__ = "chunks"
+    __table_args__ = (
+        UniqueConstraint("repository_id", "chunk_key", name="uq_chunks_repository_id_chunk_key"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    repository_id = Column(Integer, ForeignKey("repositories.id"), nullable=False, index=True)
+    file_id = Column(Integer, ForeignKey("files.id"), nullable=True, index=True)
+    symbol_id = Column(Integer, ForeignKey("symbols.id"), nullable=True, index=True)
+    # Stable identity for a chunk within a repository, so re-ingestion updates
+    # instead of duplicating.
+    chunk_key = Column(String, nullable=False, index=True)
+    chunk_type = Column(String, nullable=False)  # function, class, module, doc
+    path = Column(String, nullable=False, index=True)
+    symbol_name = Column(String, nullable=True)
+    symbol_type = Column(String, nullable=True)
+    language = Column(String, nullable=True)
+    start_line = Column(Integer, nullable=True)
+    end_line = Column(Integer, nullable=True)
+    content = Column(Text, nullable=False)
+    content_hash = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    repository = relationship("Repository")
+    file = relationship("File")
+    symbol = relationship("Symbol")
 
 class Dependency(Base):
     __tablename__ = "dependencies"

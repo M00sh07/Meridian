@@ -18,6 +18,7 @@ def _load_module(dotted_name: str, rel_path: str):
 
 _git_svc = _load_module("git_service", "services/ingestion/git_service.py")
 _parser_svc = _load_module("tree_sitter_service", "services/parser/tree_sitter_service.py")
+_chunking_svc = _load_module("chunking_service", "services/parser/chunking_service.py")
 clone_repository = _git_svc.clone_repository
 extract_commits = _git_svc.extract_commits
 discover_files = _git_svc.discover_files
@@ -33,6 +34,7 @@ from models import (
     Dependency as DBDependency,
     Commit as DBCommit,
     CommitFileChange as DBCommitFileChange,
+    Chunk as DBChunk,
     RepositoryStatus,
 )
 
@@ -86,15 +88,32 @@ def process_repository(repo_id: int):
             for file in db.query(DBFile).filter(DBFile.repository_id == repo.id).all()
         }
 
+        # Map path -> (DBFile, absolute path, symbol rows) so chunking can reuse
+        # both newly parsed and previously stored files without re-inserting them.
         db_files = {}
+        file_symbols = {}
+
         for file_rel_path in files:
             file_abs_path = os.path.join(temp_dir, file_rel_path)
             normalized_path = file_rel_path.replace(os.sep, '/')
 
             existing_file = existing_files.get(normalized_path)
             if existing_file:
-                # Already ingested; keep the row and skip re-parsing it.
+                # Already ingested; reuse the row and its persisted symbols.
                 db_files[normalized_path] = existing_file
+                file_symbols[normalized_path] = [
+                    {
+                        'id': symbol.id,
+                        'name': symbol.name,
+                        'type': symbol.type,
+                        'start_line': symbol.start_line,
+                        'end_line': symbol.end_line,
+                    }
+                    for symbol in db.query(DBSymbol)
+                    .filter(DBSymbol.file_id == existing_file.id)
+                    .order_by(DBSymbol.start_line, DBSymbol.id)
+                    .all()
+                ]
                 continue
             lang = detect_language(file_abs_path)
 
@@ -107,7 +126,7 @@ def process_repository(repo_id: int):
             db.commit()
             db.refresh(db_file)
             db_files[normalized_path] = db_file
-
+            stored_symbols = []
             if lang:
                 try:
                     symbols = parse_file(file_abs_path)
@@ -121,10 +140,19 @@ def process_repository(repo_id: int):
                             end_line=sym['end_line']
                         )
                         db.add(db_sym)
+                        db.flush()
+                        stored_symbols.append({
+                            'id': db_sym.id,
+                            'name': db_sym.name,
+                            'type': db_sym.type,
+                            'start_line': db_sym.start_line,
+                            'end_line': db_sym.end_line,
+                        })
                     db.commit()
                 except Exception as e:
                     # Log parsing error but continue
                     pass
+            file_symbols[normalized_path] = stored_symbols
 
         for file_rel_path, db_file in db_files.items():
             file_abs_path = os.path.join(temp_dir, file_rel_path.replace('/', os.sep))
@@ -140,6 +168,10 @@ def process_repository(repo_id: int):
             except Exception:
                 pass
         db.commit()
+
+        # Build deterministic semantic chunks. Re-ingestion updates existing
+        # chunks in place (matched by chunk_key) instead of duplicating them.
+        _store_chunks(db, repo.id, db_files, file_symbols, temp_dir)
 
         # Add commit file changes
         for sha, (commit_id, changes) in commit_changes_map.items():
@@ -167,6 +199,59 @@ def process_repository(repo_id: int):
     finally:
         db.close()
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _store_chunks(db, repo_id, db_files, file_symbols, temp_dir):
+    # Create or refresh semantic chunks for every discovered file. Chunks are
+    # matched on (repository_id, chunk_key) so re-ingestion updates the existing
+    # row rather than inserting a duplicate.
+    existing_chunks = {
+        chunk.chunk_key: chunk
+        for chunk in db.query(DBChunk).filter(DBChunk.repository_id == repo_id).all()
+    }
+
+    for path, db_file in db_files.items():
+        file_abs_path = os.path.join(temp_dir, path.replace('/', os.sep))
+        built = _chunking_svc.build_file_chunks(
+            path=path,
+            file_path=file_abs_path,
+            language=db_file.language,
+            symbols=file_symbols.get(path, []),
+        )
+
+        seen_keys = set()
+        for chunk_data in built:
+            chunk_key = chunk_data['chunk_key']
+            seen_keys.add(chunk_key)
+            existing = existing_chunks.get(chunk_key)
+
+            if existing:
+                existing.file_id = db_file.id
+                existing.symbol_id = chunk_data['symbol_id']
+                existing.chunk_type = chunk_data['chunk_type']
+                existing.path = chunk_data['path']
+                existing.symbol_name = chunk_data['symbol_name']
+                existing.symbol_type = chunk_data['symbol_type']
+                existing.language = chunk_data['language']
+                existing.start_line = chunk_data['start_line']
+                existing.end_line = chunk_data['end_line']
+                existing.content = chunk_data['content']
+                existing.content_hash = chunk_data['content_hash']
+            else:
+                db.add(DBChunk(
+                    repository_id=repo_id,
+                    file_id=db_file.id,
+                    **chunk_data,
+                ))
+
+        # Drop chunks for this file that no longer correspond to any content
+        # (e.g. a symbol was removed).
+        for chunk_key, stale in list(existing_chunks.items()):
+            if stale.path == path and chunk_key not in seen_keys:
+                db.delete(stale)
+                del existing_chunks[chunk_key]
+
+    db.commit()
 
 
 def _resolve_import(source_path, imported_module, db_files):

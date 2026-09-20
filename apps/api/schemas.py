@@ -94,3 +94,24 @@ class FileHotspotResponse(BaseModel):
     total_changes: int
     recent_changes: int
     last_changed_at: Optional[datetime] = None
+class ChunkResponse(BaseModel):
+    id: int
+    repository_id: int
+    file_id: Optional[int] = None
+    symbol_id: Optional[int] = None
+    chunk_type: str
+    path: str
+    symbol_name: Optional[str] = None
+    symbol_type: Optional[str] = None
+    language: Optional[str] = None
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
+    content: str
+    content_hash: str
+    model_config = ConfigDict(from_attributes=True)
+
+class PaginatedChunks(BaseModel):
+    items: List[ChunkResponse]
+    total: int
+    page: int
+    limit: int
