@@ -154,19 +154,46 @@ def process_repository(repo_id: int):
                     pass
             file_symbols[normalized_path] = stored_symbols
 
+        existing_deps = {
+            (dep.source_file_id, dep.imported_module): dep
+            for dep in db.query(DBDependency).join(
+                DBFile, DBDependency.source_file_id == DBFile.id
+            ).filter(DBFile.repository_id == repo.id).all()
+        }
+        seen_deps = set()
+
         for file_rel_path, db_file in db_files.items():
             file_abs_path = os.path.join(temp_dir, file_rel_path.replace('/', os.sep))
             try:
                 imports = extract_imports(file_abs_path)
                 for imported_module in imports:
                     target_path = _resolve_import(file_rel_path, imported_module, db_files)
-                    db.add(DBDependency(
-                        source_file_id=db_file.id,
-                        target_file_id=db_files[target_path].id if target_path else None,
-                        imported_module=imported_module,
-                    ))
-            except Exception:
-                pass
+                    target_id = db_files[target_path].id if target_path else None
+                    
+                    key = (db_file.id, imported_module)
+                    seen_deps.add(key)
+                    
+                    if key in existing_deps:
+                        existing_deps[key].target_file_id = target_id
+                    else:
+                        new_dep = DBDependency(
+                            source_file_id=db_file.id,
+                            target_file_id=target_id,
+                            imported_module=imported_module,
+                        )
+                        db.add(new_dep)
+                        existing_deps[key] = new_dep
+            except Exception as e:
+                print(f"Dependency extraction failed for {file_rel_path}: {e}")
+                # Preserve existing dependencies so they are not swept away
+                for key in existing_deps:
+                    if key[0] == db_file.id:
+                        seen_deps.add(key)
+                
+        for key, dep in list(existing_deps.items()):
+            if key not in seen_deps:
+                db.delete(dep)
+                
         db.commit()
 
         # Build deterministic semantic chunks. Re-ingestion updates existing
