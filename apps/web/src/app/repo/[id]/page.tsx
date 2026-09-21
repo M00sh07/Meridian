@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
@@ -11,7 +12,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { GitCommit, GitGraph, File, History, Flame, Folder, AlertTriangle, ArrowRight, ArrowLeft } from "lucide-react";
+import { GitCommit, GitGraph, File, History, Flame, Folder, AlertTriangle, ArrowRight, ArrowLeft, Search, Zap, ShieldAlert, Box } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +22,7 @@ interface FileItem { id: number; path: string; language: string; }
 interface SymbolItem { id: number; name: string; type: string; signature: string; start_line: number; file_id: number; }
 interface Dependency { source_file: string; target_file: string | null; imported_module: string; }
 interface CommitItem { sha: string; message: string; author: string; date: string; }
-interface HotspotItem { file_id: number; path: string; churn_score: number; }
+interface HotspotItem { file_id: number; path: string; total_changes: number; recent_changes: number; }
 interface FileChurn { commits_count: number; lines_added: number; lines_deleted: number; }
 
 // --- Sub-Components ---
@@ -235,11 +236,383 @@ function HotspotsTab({ repoId }: { repoId: number }) {
           </div>
           <div className="flex items-center gap-2">
             <Flame size={14} className="text-red-500" />
-            <span className="text-xs font-mono text-white/60 bg-red-500/10 px-2 py-0.5 rounded">Score: {h.churn_score.toFixed(2)}</span>
+            <span className="text-xs font-mono text-white/60 bg-red-500/10 px-2 py-0.5 rounded" title={`Total: ${h.total_changes}`}>Changes: {h.recent_changes} recent</span>
           </div>
         </div>
       ))}
       {hotspots.length === 0 && <div className="p-4 text-xs font-mono text-white/50">No hotspots found.</div>}
+    </div>
+  );
+}
+
+function SearchTab({ repoId }: { repoId: number }) {
+  const [query, setQuery] = useState("");
+  const [mode, setMode] = useState("hybrid");
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
+
+  const doSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query) return;
+    setLoading(true);
+    setSearched(true);
+    try {
+      const res = await api.search(repoId, query, mode);
+      setResults(res.results || []);
+    } catch (err) {
+      console.error(err);
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <form onSubmit={doSearch} className="flex gap-4">
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search semantic or lexical..."
+          className="flex-1 bg-graphite-900 border border-white/10 rounded px-4 py-2 text-sm text-white focus:outline-none focus:border-mer-cyan transition-colors"
+        />
+        <select
+          value={mode}
+          onChange={e => setMode(e.target.value)}
+          className="bg-graphite-900 border border-white/10 rounded px-4 py-2 text-sm text-white focus:outline-none focus:border-mer-cyan"
+        >
+          <option value="hybrid">Hybrid</option>
+          <option value="semantic">Semantic</option>
+          <option value="lexical">Lexical</option>
+        </select>
+        <button type="submit" disabled={loading} className="px-4 py-2 bg-white/5 border border-white/10 rounded hover:bg-white/10 transition-colors text-sm font-medium">
+          {loading ? "Searching..." : "Search"}
+        </button>
+      </form>
+
+      {searched && !loading && results.length === 0 && (
+        <div className="p-8 text-center text-white/50 text-sm font-mono border border-white/5 border-dashed rounded bg-black/20">No results found</div>
+      )}
+
+      {results.length > 0 && (
+        <div className="space-y-3">
+          {results.map((r, i) => (
+            <div key={i} className="p-4 bg-graphite-900 border border-white/10 rounded space-y-2">
+              <div className="flex justify-between items-start">
+                <div>
+                  <div className="text-sm font-mono text-white/90">{r.path}</div>
+                  {(r.start_line || r.end_line) && <div className="text-xs text-white/40 font-mono mt-0.5">Lines: {r.start_line}-{r.end_line}</div>}
+                  {r.symbol_name && <div className="text-xs text-mer-cyan font-mono mt-0.5">{r.symbol_name} ({r.chunk_type})</div>}
+                </div>
+                <div className="flex gap-2 text-[10px] font-mono">
+                  {r.score !== undefined && r.score !== null && <div className="px-2 py-1 bg-mer-amber/10 text-mer-amber rounded border border-mer-amber/20">Final: {r.score.toFixed(3)}</div>}
+                  {r.similarity !== undefined && r.similarity !== null && <div className="px-2 py-1 bg-white/5 text-white/60 rounded border border-white/10">Semantic: {r.similarity.toFixed(3)}</div>}
+                </div>
+              </div>
+              <pre className="text-xs font-mono text-white/70 bg-black/40 p-3 rounded overflow-x-auto whitespace-pre-wrap border border-white/5">
+                {r.content}
+              </pre>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImpactTab({ repoId }: { repoId: number }) {
+  const [path, setPath] = useState("");
+  const [depth, setDepth] = useState(1);
+  const [data, setData] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const doAnalyze = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!path) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.getImpact(repoId, path, depth);
+      setData(res);
+    } catch (err: unknown) {
+      setError((err as Error).message || "Failed to load impact");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <form onSubmit={doAnalyze} className="flex gap-4 flex-wrap">
+        <input
+          value={path}
+          onChange={e => setPath(e.target.value)}
+          placeholder="File path (e.g., src/main.py)"
+          className="flex-1 bg-graphite-900 border border-white/10 rounded px-4 py-2 text-sm text-white focus:outline-none focus:border-mer-cyan"
+        />
+        <input
+          type="number"
+          value={depth}
+          onChange={e => setDepth(parseInt(e.target.value) || 1)}
+          min="1" max="10"
+          className="w-24 bg-graphite-900 border border-white/10 rounded px-4 py-2 text-sm text-white focus:outline-none focus:border-mer-cyan"
+        />
+        <button type="submit" disabled={loading} className="px-4 py-2 bg-white/5 border border-white/10 rounded hover:bg-white/10 transition-colors text-sm font-medium">
+          {loading ? "Analyzing..." : "Analyze Impact"}
+        </button>
+      </form>
+
+      {error && <div className="p-4 text-red-400 bg-red-950/20 border border-red-500/20 rounded text-sm">{error}</div>}
+
+      {data && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="mer-stat">
+              <div className="mer-stat-label">Total Affected</div>
+              <div className="mer-stat-value text-mer-cyan">{data.total_affected}</div>
+            </div>
+            <div className="mer-stat">
+              <div className="mer-stat-label">Direct Dependencies</div>
+              <div className="mer-stat-value">{data.direct_dependencies?.length || 0}</div>
+            </div>
+            <div className="mer-stat">
+              <div className="mer-stat-label">Direct Dependents</div>
+              <div className="mer-stat-value">{data.direct_dependents?.length || 0}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium text-white/80">Direct Dependencies</h3>
+              {data.direct_dependencies?.length === 0 ? (
+                <div className="text-xs text-white/40 italic">None found.</div>
+              ) : (
+                <div className="space-y-2">
+                  {data.direct_dependencies?.map((n: any, i: number) => (
+                    <div key={i} className="text-xs font-mono p-2 bg-white/5 rounded border border-white/5 truncate flex justify-between">
+                      <span>{n.path}</span>
+                      <span className="text-white/30 text-[10px]">depth:{n.depth}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium text-white/80">Direct Dependents</h3>
+              {data.direct_dependents?.length === 0 ? (
+                <div className="text-xs text-white/40 italic">None found.</div>
+              ) : (
+                <div className="space-y-2">
+                  {data.direct_dependents?.map((n: any, i: number) => (
+                    <div key={i} className="text-xs font-mono p-2 bg-white/5 rounded border border-white/5 truncate flex justify-between">
+                      <span>{n.path}</span>
+                      <span className="text-white/30 text-[10px]">depth:{n.depth}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RiskTab({ repoId }: { repoId: number }) {
+  const [path, setPath] = useState("");
+  const [data, setData] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const doAnalyze = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!path) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.getRiskFeatures(repoId, path, 1);
+      setData(res);
+    } catch (err: unknown) {
+      setError((err as Error).message || "Failed to load risk features");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <form onSubmit={doAnalyze} className="flex gap-4 flex-wrap">
+        <input
+          value={path}
+          onChange={e => setPath(e.target.value)}
+          placeholder="File path (e.g., src/main.py)"
+          className="flex-1 bg-graphite-900 border border-white/10 rounded px-4 py-2 text-sm text-white focus:outline-none focus:border-mer-cyan"
+        />
+        <button type="submit" disabled={loading} className="px-4 py-2 bg-white/5 border border-white/10 rounded hover:bg-white/10 transition-colors text-sm font-medium">
+          {loading ? "Extracting..." : "Extract Features"}
+        </button>
+      </form>
+
+      {error && <div className="p-4 text-red-400 bg-red-950/20 border border-red-500/20 rounded text-sm">{error}</div>}
+
+      {data && data.features && (
+        <div className="space-y-6">
+          <div className="p-4 bg-mer-cyan/5 border border-mer-cyan/20 rounded-md">
+            <h3 className="text-sm font-medium text-mer-cyan flex items-center gap-2">
+              <ShieldAlert size={16} /> Feature Analysis
+            </h3>
+            <p className="text-xs text-white/60 mt-1">
+              Current computed features representing evidence for future risk prediction models. No predictive probabilities are generated in this phase.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="mer-stat">
+              <div className="mer-stat-label">Symbols</div>
+              <div className="mer-stat-value">{data.features.symbol_count}</div>
+            </div>
+            <div className="mer-stat">
+              <div className="mer-stat-label">Functions</div>
+              <div className="mer-stat-value">{data.features.function_count}</div>
+            </div>
+            <div className="mer-stat">
+              <div className="mer-stat-label">Classes</div>
+              <div className="mer-stat-value">{data.features.class_count}</div>
+            </div>
+            <div className="mer-stat">
+              <div className="mer-stat-label">Historical Changes</div>
+              <div className="mer-stat-value text-mer-amber">{data.features.historical_change_count}</div>
+            </div>
+            <div className="mer-stat">
+              <div className="mer-stat-label">Recent Changes</div>
+              <div className="mer-stat-value">{data.features.recent_change_count}</div>
+            </div>
+            <div className="mer-stat">
+              <div className="mer-stat-label">Co-changed Files</div>
+              <div className="mer-stat-value">{data.features.co_changed_file_count}</div>
+            </div>
+            <div className="mer-stat">
+              <div className="mer-stat-label">Direct Deps</div>
+              <div className="mer-stat-value">{data.features.direct_dependency_count}</div>
+            </div>
+            <div className="mer-stat">
+              <div className="mer-stat-label">Direct Dependents</div>
+              <div className="mer-stat-value">{data.features.direct_dependent_count}</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ContextTab({ repoId }: { repoId: number }) {
+  const [query, setQuery] = useState("");
+  const [mode, setMode] = useState("hybrid");
+  const [budget, setBudget] = useState<number | "">("");
+  const [data, setData] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const doAssemble = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.getContext(repoId, query, mode, 50, budget ? Number(budget) : undefined);
+      setData(res);
+    } catch (err: unknown) {
+      setError((err as Error).message || "Failed to assemble context");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <form onSubmit={doAssemble} className="flex gap-4 flex-wrap">
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Topic or task (e.g., authentication flow)..."
+          className="flex-1 bg-graphite-900 border border-white/10 rounded px-4 py-2 text-sm text-white focus:outline-none focus:border-mer-cyan transition-colors"
+        />
+        <select
+          value={mode}
+          onChange={e => setMode(e.target.value)}
+          className="bg-graphite-900 border border-white/10 rounded px-4 py-2 text-sm text-white focus:outline-none focus:border-mer-cyan"
+        >
+          <option value="hybrid">Hybrid</option>
+          <option value="semantic">Semantic</option>
+          <option value="lexical">Lexical</option>
+        </select>
+        <input
+          type="number"
+          value={budget}
+          onChange={e => setBudget(e.target.value ? Number(e.target.value) : "")}
+          placeholder="Budget (chars)"
+          className="w-32 bg-graphite-900 border border-white/10 rounded px-4 py-2 text-sm text-white focus:outline-none focus:border-mer-cyan"
+        />
+        <button type="submit" disabled={loading} className="px-4 py-2 bg-white/5 border border-white/10 rounded hover:bg-white/10 transition-colors text-sm font-medium">
+          {loading ? "Assembling..." : "Assemble Context"}
+        </button>
+      </form>
+
+      {error && <div className="p-4 text-red-400 bg-red-950/20 border border-red-500/20 rounded text-sm">{error}</div>}
+
+      {data && (
+        <div className="space-y-6">
+          <div className="flex flex-wrap gap-4 p-4 border border-white/10 rounded bg-white/5 items-center justify-between">
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium text-white/90">Context Assembly</h3>
+              <p className="text-xs text-white/50">Retrieved repository context (not generated truth). Bound by character budget.</p>
+            </div>
+            <div className="flex gap-4 text-xs font-mono text-white/40 bg-black/20 p-2 rounded">
+              <div>Chunks: <span className="text-white/80">{data.total_chunks}</span></div>
+              <div>Chars: <span className="text-white/80">{data.total_characters}</span></div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {data.files?.map((f: any, i: number) => (
+              <div key={i} className="border border-white/10 rounded bg-graphite-900 overflow-hidden">
+                <div className="px-4 py-2 bg-white/5 border-b border-white/10 flex items-center justify-between">
+                  <span className="text-sm font-mono text-white/90">{f.path}</span>
+                  <span className="text-xs font-mono text-white/40">{f.chunks.length} chunks</span>
+                </div>
+                <div className="p-4 space-y-4">
+                  {f.chunks.map((c: any, j: number) => (
+                    <div key={j} className="space-y-2">
+                      <div className="flex justify-between items-center text-xs font-mono text-white/50">
+                        <span>{c.symbol_name || c.chunk_type}</span>
+                        <div className="flex gap-2 text-[10px]">
+                          {c.score !== undefined && c.score !== null && <span className="text-mer-cyan border border-mer-cyan/20 px-1 rounded">score:{c.score.toFixed(3)}</span>}
+                          {c.semantic_score !== undefined && c.semantic_score !== null && <span className="text-white/40 border border-white/10 px-1 rounded">sem:{c.semantic_score.toFixed(3)}</span>}
+                          {c.lexical_score !== undefined && c.lexical_score !== null && <span className="text-white/40 border border-white/10 px-1 rounded">lex:{c.lexical_score.toFixed(3)}</span>}
+                        </div>
+                      </div>
+                      <pre className="text-xs font-mono text-white/70 bg-black/40 p-3 rounded overflow-x-auto whitespace-pre-wrap border border-white/5">
+                        {c.content}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {data.files?.length === 0 && (
+              <div className="p-8 text-center text-white/50 text-sm font-mono border border-white/5 border-dashed rounded bg-black/20">No relevant context found within budget.</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -249,7 +622,7 @@ export default function RepoExplorer() {
   const id = parseInt(params.id as string, 10);
 
   const [repo, setRepo] = useState<Repository | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "arch" | "files" | "history" | "hotspots">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "arch" | "files" | "history" | "hotspots" | "search" | "impact" | "risk" | "context">("overview");
 
   useEffect(() => {
     api.getRepository(id).then(setRepo);
@@ -268,6 +641,10 @@ export default function RepoExplorer() {
     { id: "arch", label: "Architecture", icon: GitGraph },
     { id: "files", label: "Files", icon: File },
     { id: "history", label: "History", icon: GitCommit },
+    { id: "search", label: "Search", icon: Search },
+    { id: "impact", label: "Impact", icon: Zap },
+    { id: "risk", label: "Risk Features", icon: ShieldAlert },
+    { id: "context", label: "Context", icon: Box },
     { id: "hotspots", label: "Hotspots", icon: Flame },
   ] as const;
 
@@ -290,13 +667,13 @@ export default function RepoExplorer() {
       </header>
 
       <div className="max-w-6xl mx-auto p-6 md:p-8 space-y-8">
-        <nav className="flex gap-1 border-b border-white/5 pb-px">
+        <nav className="flex gap-1 border-b border-white/5 pb-px overflow-x-auto mer-scroll">
           {tabs.map(t => (
             <button
               key={t.id}
-              onClick={() => setActiveTab(t.id as "overview" | "arch" | "files" | "history" | "hotspots")}
+              onClick={() => setActiveTab(t.id as 'overview' | 'arch' | 'files' | 'history' | 'hotspots' | 'search' | 'impact' | 'risk' | 'context')}
               className={cn(
-                "flex items-center gap-2 px-4 py-2.5 text-xs font-medium uppercase tracking-wider transition-all border-b-2",
+                "flex items-center gap-2 px-4 py-2.5 text-xs font-medium uppercase tracking-wider transition-all border-b-2 whitespace-nowrap",
                 activeTab === t.id
                   ? "border-mer-cyan text-mer-cyan bg-mer-cyan/5"
                   : "border-transparent text-white/50 hover:text-white/90 hover:bg-white/5"
@@ -313,6 +690,10 @@ export default function RepoExplorer() {
           {activeTab === "arch" && <ArchitectureTab repoId={id} />}
           {activeTab === "files" && <FilesTab repoId={id} />}
           {activeTab === "history" && <HistoryTab repoId={id} />}
+          {activeTab === "search" && <SearchTab repoId={id} />}
+          {activeTab === "impact" && <ImpactTab repoId={id} />}
+          {activeTab === "risk" && <RiskTab repoId={id} />}
+          {activeTab === "context" && <ContextTab repoId={id} />}
           {activeTab === "hotspots" && <HotspotsTab repoId={id} />}
         </main>
       </div>

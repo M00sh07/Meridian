@@ -39,13 +39,40 @@ from models import (
     RepositoryStatus,
 )
 
+def _prepare_for_ingestion(repo_id: int):
+    """Return a cloneable URL for `repo_id`, or None when it is not allowed.
+
+    Only HTTPS GitHub URLs may reach git. `file:///` URLs are additionally
+    accepted because local development and tests drive ingestion from a local
+    repository path rather than a user-supplied remote.
+    """
+    db: Session = SessionLocal()
+    try:
+        repo = db.query(Repository).filter(Repository.id == repo_id).first()
+        if repo is None:
+            return None
+        url = repo.url or ""
+        if url.startswith("file:///"):
+            return url
+        if not is_safe_github_url(url):
+            return None
+        return url
+    finally:
+        db.close()
+
 def process_repository(repo_id: int):
     db: Session = SessionLocal()
     repo = db.query(Repository).filter(Repository.id == repo_id).first()
     if not repo:
         db.close()
         return
-
+    # Fail closed on URLs that are not safe to clone, so a malformed or
+    # attacker-supplied remote can never reach git.
+    if _prepare_for_ingestion(repo_id) is None:
+        repo.status = RepositoryStatus.failed
+        db.commit()
+        db.close()
+        return
     temp_dir = tempfile.mkdtemp()
 
     try:

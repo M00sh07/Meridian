@@ -34,6 +34,17 @@ export const api = {
     request<any>(`/repositories/${id}/files/${fileId}/churn`),
   getHotspots: (id: number, limit = 20) =>
     request<any[]>(`/repositories/${id}/hotspots?limit=${limit}`),
+  search: (id: number, q: string, mode = "hybrid", limit = 10) =>
+    request<any>(`/repositories/${id}/search?q=${encodeURIComponent(q)}&mode=${mode}&limit=${limit}`),
+  getContext: (id: number, q: string, mode = "hybrid", limit = 50, budget?: number) => {
+    let url = `/repositories/${id}/context?q=${encodeURIComponent(q)}&mode=${mode}&limit=${limit}`;
+    if (budget) url += `&budget=${budget}`;
+    return request<any>(url);
+  },
+  getImpact: (id: number, path: string, depth = 1) =>
+    request<any>(`/repositories/${id}/impact?path=${encodeURIComponent(path)}&depth=${depth}`),
+  getRiskFeatures: (id: number, path: string, depth = 1) =>
+    request<any>(`/repositories/${id}/risk/features?path=${encodeURIComponent(path)}&depth=${depth}`),
 };
 
 export default API_BASE;

@@ -1,29 +1,35 @@
-import os
-import tempfile
+"""Foreign-key enforcement tests.
+
+Every engine used here is created by tests/conftest.py inside pytest's temporary
+directory. The persistent development database is never opened, not even for a
+read-only PRAGMA check.
+"""
 import pytest
 from datetime import datetime
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
 from models import Base, Repository, File, Dependency, Commit, CommitFileChange, Chunk
+# Importing database registers the shared connect listener that applies
+# PRAGMA foreign_keys=ON to every sqlite connection in this process.
+import database  # noqa: F401  (import for listener registration)
 
-# Import database module to ensure event listener is registered and to test the app engine
-import database
 
+def test_app_engine_pragma(isolated_application_engine):
+    """The application engine used by tests has PRAGMA foreign_keys=1.
 
-def test_app_engine_pragma():
-    """1. Verify the actual application's database.engine has PRAGMA foreign_keys=1."""
+    `isolated_application_engine` is conftest's session-scoped fixture that makes
+    `database.engine` point at the temporary test database, so this assertion
+    never touches the development database.
+    """
     with database.engine.connect() as conn:
         res = conn.execute(text("PRAGMA foreign_keys")).scalar()
         assert res == 1, "Application engine should have PRAGMA foreign_keys=1"
 
 
-def test_new_engine_pragma():
-    """2 & 3. Verify newly created engine and pooled connections have PRAGMA foreign_keys=1."""
-    db_path = os.path.join(tempfile.gettempdir(), "test_fk_pragma.db")
-    if os.path.exists(db_path):
-        os.remove(db_path)
-
+def test_new_engine_pragma(tmp_path):
+    """A newly created engine and its pooled connections enforce foreign keys."""
+    db_path = str(tmp_path / "test_fk_pragma.db")
     engine = create_engine(f"sqlite:///{db_path}")
     Session = sessionmaker(bind=engine)
 
@@ -38,14 +44,13 @@ def test_new_engine_pragma():
     res = session.execute(text("PRAGMA foreign_keys")).scalar()
     assert res == 1, "Pooled connection should retain PRAGMA foreign_keys=1"
     session.close()
+    engine.dispose()
 
 
 @pytest.fixture
-def test_session():
-    """Provides a session connected to a fresh temporary SQLite database."""
-    db_path = os.path.join(tempfile.gettempdir(), "test_fk_data.db")
-    if os.path.exists(db_path):
-        os.remove(db_path)
+def test_session(tmp_path):
+    """Provide a session connected to a fresh temporary SQLite database."""
+    db_path = str(tmp_path / "test_fk_data.db")
 
     engine = create_engine(f"sqlite:///{db_path}")
     Base.metadata.create_all(engine)
@@ -53,13 +58,8 @@ def test_session():
     session = Session()
 
     yield session
-
     session.close()
-    if os.path.exists(db_path):
-        try:
-            os.remove(db_path)
-        except Exception:
-            pass
+    engine.dispose()
 
 
 def test_foreign_keys_enforcement(test_session):

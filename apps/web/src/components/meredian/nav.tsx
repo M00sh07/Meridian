@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { MerLabel } from "@/components/meredian/label";
 import { CommandPalette } from "@/components/meredian/command-palette";
-import { Search, Layout, GitBranch, FileText, GitGraph, Flame, Home, Menu, X } from "lucide-react";
+import { Search, Layout, GitBranch, FileText, GitGraph, Flame, Home, Menu, X, FileSearch, ShieldAlert, Zap, Box } from "lucide-react";
 
 interface NavItem {
   label: string;
@@ -15,11 +15,8 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { label: "Overview", href: "/repo", icon: Layout },
-  { label: "Architecture", href: "/repo/arch", icon: GitGraph },
-  { label: "Files", href: "/repo/files", icon: FileText },
-  { label: "History", href: "/repo/history", icon: GitBranch },
-  { label: "Hotspots", href: "/repo/hotspots", icon: Flame },
+  { label: "Dashboard", href: "/", icon: Home },
+  { label: "Observatory", href: "/repo", icon: Layout },
 ];
 
 export function MerNav({ repoId }: { repoId?: string }) {

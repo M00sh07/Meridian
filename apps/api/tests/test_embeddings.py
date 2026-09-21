@@ -19,7 +19,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from fastapi.testclient import TestClient
 from main import app
-from database import Base, engine, SessionLocal
 from models import (
     Repository,
     File as DBFile,
@@ -34,7 +33,9 @@ REPO_B = 9102
 
 DIM = 8  # small dimension keeps test vectors readable
 
-client = TestClient(app)
+# Assigned by setup_db from the conftest-provided test session factory.
+_SessionLocal = None
+client = TestClient(app)  # replaced with isolated-DB client in setup_db
 
 
 class FakeProvider:
@@ -43,18 +44,17 @@ class FakeProvider:
     def __init__(self, dimension=DIM, fail=False, model_name="fake-model"):
         self._dimension = dimension
         self.model_name = model_name
-        self.fail = fail
         self.calls = []
+        self.fail = fail
 
     @property
     def dimension(self):
         return self._dimension
 
     def embed(self, texts):
-        self.calls.append(list(texts))
+        self.calls.append(texts)
         if self.fail:
             raise RuntimeError("provider exploded")
-        # Deterministic vector derived from the text, so content changes are visible.
         return [
             [float((sum(map(ord, t)) + i) % 97) / 97.0 for i in range(self._dimension)]
             for t in texts
@@ -71,15 +71,18 @@ def fake_provider():
 
 
 @pytest.fixture(scope="module", autouse=True)
-def setup_db():
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
+def setup_db(isolated_application_engine, TestingSessionLocal):
+    global _SessionLocal, client
+    _SessionLocal = TestingSessionLocal
+    client = TestClient(app)
+    # Schema is created once by conftest.py's session-scoped test_engine.
+    db = _SessionLocal()
     db.add(Repository(id=REPO_A, url="https://github.com/test/embed-a", status=RepositoryStatus.completed))
     db.add(Repository(id=REPO_B, url="https://github.com/test/embed-b", status=RepositoryStatus.completed))
     db.commit()
     db.close()
     yield
-    db = SessionLocal()
+    db = _SessionLocal()
     db.query(DBChunk).filter(DBChunk.repository_id.in_([REPO_A, REPO_B])).delete(synchronize_session=False)
     db.query(DBFile).filter(DBFile.repository_id.in_([REPO_A, REPO_B])).delete(synchronize_session=False)
     db.query(Repository).filter(Repository.id.in_([REPO_A, REPO_B])).delete(synchronize_session=False)
@@ -88,14 +91,14 @@ def setup_db():
 
 
 def _clear_chunks(repo_id):
-    db = SessionLocal()
+    db = _SessionLocal()
     db.query(DBChunk).filter(DBChunk.repository_id == repo_id).delete(synchronize_session=False)
     db.commit()
     db.close()
 
 
 def _make_chunks(repo_id, count=3, prefix="c"):
-    db = SessionLocal()
+    db = _SessionLocal()
     for i in range(count):
         content = f"def {prefix}{i}():\n    return {i}\n"
         db.add(DBChunk(
@@ -159,13 +162,13 @@ def test_embeddings_persist_for_chunks():
     _clear_chunks(REPO_A)
     _make_chunks(REPO_A, 3)
 
-    summary = embed_repository_chunks(SessionLocal(), REPO_A)
+    summary = embed_repository_chunks(_SessionLocal(), REPO_A)
 
     assert summary["embedded"] == 3
     assert summary["skipped"] == 0
     assert summary["failed"] == 0
 
-    db = SessionLocal()
+    db = _SessionLocal()
     chunks = db.query(DBChunk).filter(DBChunk.repository_id == REPO_A).all()
     db.close()
 
@@ -183,14 +186,14 @@ def test_repeated_embedding_is_idempotent(fake_provider):
     _clear_chunks(REPO_A)
     _make_chunks(REPO_A, 3)
 
-    embed_repository_chunks(SessionLocal(), REPO_A)
+    embed_repository_chunks(_SessionLocal(), REPO_A)
     calls_after_first = len(fake_provider.calls)
 
-    second = embed_repository_chunks(SessionLocal(), REPO_A)
+    second = embed_repository_chunks(_SessionLocal(), REPO_A)
 
     assert second["embedded"] == 0
     assert second["skipped"] == 3
-    assert count_pending_chunks(SessionLocal(), REPO_A) == 0
+    assert count_pending_chunks(_SessionLocal(), REPO_A) == 0
     # No provider call at all on the second run.
     assert len(fake_provider.calls) == calls_after_first
 
@@ -199,9 +202,9 @@ def test_changed_content_hash_regenerates_embedding(fake_provider):
     _clear_chunks(REPO_A)
     _make_chunks(REPO_A, 1)
 
-    embed_repository_chunks(SessionLocal(), REPO_A)
+    embed_repository_chunks(_SessionLocal(), REPO_A)
 
-    db = SessionLocal()
+    db = _SessionLocal()
     chunk = db.query(DBChunk).filter(DBChunk.repository_id == REPO_A).one()
     old_hash = chunk.embedded_content_hash
     chunk.content = "def c0():\n    return 999\n"
@@ -210,11 +213,11 @@ def test_changed_content_hash_regenerates_embedding(fake_provider):
     chunk_id = chunk.id
     db.close()
 
-    result = embed_repository_chunks(SessionLocal(), REPO_A)
+    result = embed_repository_chunks(_SessionLocal(), REPO_A)
     assert result["embedded"] == 1
     assert result["skipped"] == 0
 
-    db = SessionLocal()
+    db = _SessionLocal()
     updated = db.query(DBChunk).filter(DBChunk.id == chunk_id).one()
     db.close()
     assert updated.embedded_content_hash == "hash-changed"
@@ -224,9 +227,9 @@ def test_changed_content_hash_regenerates_embedding(fake_provider):
 def test_force_reembeds_unchanged_chunks():
     _clear_chunks(REPO_A)
     _make_chunks(REPO_A, 2)
-    embed_repository_chunks(SessionLocal(), REPO_A)
+    embed_repository_chunks(_SessionLocal(), REPO_A)
 
-    forced = embed_repository_chunks(SessionLocal(), REPO_A, force=True)
+    forced = embed_repository_chunks(_SessionLocal(), REPO_A, force=True)
     assert forced["embedded"] == 2
     assert forced["skipped"] == 0
 
@@ -235,7 +238,7 @@ def test_failed_embedding_preserves_chunk_data():
     _clear_chunks(REPO_A)
     _make_chunks(REPO_A, 2)
 
-    db = SessionLocal()
+    db = _SessionLocal()
     before = [
         (c.id, c.chunk_key, c.content, c.content_hash)
         for c in db.query(DBChunk).filter(DBChunk.repository_id == REPO_A).order_by(DBChunk.id).all()
@@ -243,13 +246,13 @@ def test_failed_embedding_preserves_chunk_data():
     db.close()
 
     failing = FakeProvider(fail=True)
-    result = embed_repository_chunks(SessionLocal(), REPO_A, provider=failing)
+    result = embed_repository_chunks(_SessionLocal(), REPO_A, provider=failing)
 
     assert result["failed"] == 2
     assert result["embedded"] == 0
     assert result["errors"]
 
-    db = SessionLocal()
+    db = _SessionLocal()
     after = [
         (c.id, c.chunk_key, c.content, c.content_hash)
         for c in db.query(DBChunk).filter(DBChunk.repository_id == REPO_A).order_by(DBChunk.id).all()
@@ -273,11 +276,11 @@ def test_provider_arity_mismatch_does_not_partially_embed():
         def embed(self, texts):
             return [[0.0] * DIM]  # only one vector for the batch
 
-    result = embed_repository_chunks(SessionLocal(), REPO_A, provider=ShortProvider())
+    result = embed_repository_chunks(_SessionLocal(), REPO_A, provider=ShortProvider())
     assert result["failed"] == 3
     assert result["embedded"] == 0
 
-    db = SessionLocal()
+    db = _SessionLocal()
     chunks = db.query(DBChunk).filter(DBChunk.repository_id == REPO_A).all()
     db.close()
     assert all(c.embedding is None for c in chunks)
@@ -288,7 +291,7 @@ def test_batching_calls_provider_in_batches():
     _make_chunks(REPO_A, 5)
 
     provider = FakeProvider()
-    embed_repository_chunks(SessionLocal(), REPO_A, batch_size=2, provider=provider)
+    embed_repository_chunks(_SessionLocal(), REPO_A, batch_size=2, provider=provider)
 
     assert [len(call) for call in provider.calls] == [2, 2, 1]
 
@@ -303,9 +306,9 @@ def test_embedding_is_repository_scoped():
     _make_chunks(REPO_A, 2, prefix="a")
     _make_chunks(REPO_B, 2, prefix="b")
 
-    embed_repository_chunks(SessionLocal(), REPO_A)
+    embed_repository_chunks(_SessionLocal(), REPO_A)
 
-    db = SessionLocal()
+    db = _SessionLocal()
     a_chunks = db.query(DBChunk).filter(DBChunk.repository_id == REPO_A).all()
     b_chunks = db.query(DBChunk).filter(DBChunk.repository_id == REPO_B).all()
     db.close()
@@ -313,7 +316,7 @@ def test_embedding_is_repository_scoped():
     assert all(c.embedding is not None for c in a_chunks)
     # Repo B was never touched.
     assert all(c.embedding is None for c in b_chunks)
-    assert count_pending_chunks(SessionLocal(), REPO_B) == 2
+    assert count_pending_chunks(_SessionLocal(), REPO_B) == 2
 
 
 # --------------------------------------------------------------------------

@@ -1,38 +1,28 @@
+"""Risk feature extraction tests.
+
+Database isolation comes entirely from tests/conftest.py (`test_engine`,
+`TestingSessionLocal` and the global `get_db` override). This module no longer
+creates its own engine, never calls `drop_all()`, and never writes a .db file
+next to the tests.
+"""
 import pytest
-import os
 from fastapi.testclient import TestClient
 from datetime import datetime
-from database import get_db
 from models import File, Repository, Symbol, Dependency, Commit, CommitFileChange
-
-# In-memory database setup specifically for isolated testing
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from models import Base
 from main import app
 
-test_db_path = os.path.join(os.path.dirname(__file__), "test_risk_features.db")
-engine = create_engine(
-    f"sqlite:///{test_db_path}",
-    connect_args={"check_same_thread": False},
-)
-Base.metadata.drop_all(bind=engine)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base.metadata.create_all(bind=engine)
-
-def override_get_db():
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
+# IDs captured during fixture setup (allocated by the database).
+_repo_id = None
+_repo2_id = None
+
+
 @pytest.fixture(scope="module", autouse=True)
-def populate_test_data():
+def populate_test_data(isolated_application_engine, TestingSessionLocal):
+    """Create the rows this module needs in the isolated database."""
     db = TestingSessionLocal()
+    global _repo_id, _repo2_id
     
     repo = Repository(url="https://github.com/test/risk", status="completed", created_at=datetime.utcnow(), updated_at=datetime.utcnow())
     db.add(repo)
@@ -40,6 +30,8 @@ def populate_test_data():
     db.add(repo2)
     db.commit()
     
+    _repo_id = repo.id
+    _repo2_id = repo2.id
     f1 = File(repository_id=repo.id, path="src/main.py")
     f2 = File(repository_id=repo.id, path="src/utils.py")
     f3 = File(repository_id=repo.id, path="src/core.py")
@@ -82,7 +74,7 @@ def populate_test_data():
     db.close()
 
 def test_risk_features_success():
-    response = client.get("/repositories/1/risk/features?path=src/main.py")
+    response = client.get(f"/repositories/{_repo_id}/risk/features?path=src/main.py")
     assert response.status_code == 200
     data = response.json()
     
@@ -105,22 +97,29 @@ def test_risk_features_success():
     assert features["recent_change_count"] == 2 # c2, c3
     assert features["co_changed_file_count"] == 1 # f2 (in c2)
 
-def test_risk_features_missing_repo():
-    response = client.get("/repositories/99/risk/features?path=src/main.py")
+def test_risk_features_missing_repo(TestingSessionLocal):
+    """An unknown repository id must 404; the id is derived, not hardcoded."""
+    db = TestingSessionLocal()
+    known_ids = {row.id for row in db.query(Repository.id).all()}
+    db.close()
+
+    unknown_id = max(known_ids) + 1 if known_ids else 1
+    assert unknown_id not in known_ids
+    response = client.get(f"/repositories/{unknown_id}/risk/features?path=src/main.py")
     assert response.status_code == 404
 
 def test_risk_features_missing_file():
-    response = client.get("/repositories/1/risk/features?path=missing.py")
+    response = client.get(f"/repositories/{_repo_id}/risk/features?path=missing.py")
     assert response.status_code == 404
 
 def test_risk_features_normalization():
-    response = client.get("/repositories/1/risk/features?path=src\\main.py")
+    response = client.get(f"/repositories/{_repo_id}/risk/features?path=src\\main.py")
     assert response.status_code == 200
     assert response.json()["target"]["path"] == "src/main.py"
 
 def test_risk_features_repo_isolation():
     # f4 in repo 2 has no symbols, no deps, no commits
-    response = client.get("/repositories/2/risk/features?path=src/main.py")
+    response = client.get(f"/repositories/{_repo2_id}/risk/features?path=src/main.py")
     assert response.status_code == 200
     features = response.json()["features"]
     assert features["symbol_count"] == 0
@@ -130,7 +129,7 @@ def test_risk_features_repo_isolation():
 def test_risk_features_depth_behavior():
     # Test depth 0 (should use default 1 or handle gracefully if passed)
     # The API query bounds depth ge=1, le=10, so we pass 10
-    response = client.get("/repositories/1/risk/features?path=src/main.py&depth=10")
+    response = client.get(f"/repositories/{_repo_id}/risk/features?path=src/main.py&depth=10")
     assert response.status_code == 200
     assert response.json()["features"]["transitive_affected_file_count"] == 2
 

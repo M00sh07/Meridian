@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from fastapi.testclient import TestClient
 from main import app
-from database import Base, engine, SessionLocal
+import database
 from models import (
     Repository,
     File as DBFile,
@@ -29,10 +29,13 @@ from models import (
     RepositoryStatus,
 )
 
+# Ids are reserved inside the temporary test database only; they never collide
+# with the persistent development database because they live in separate files.
 REPO_A = 9001
 REPO_B = 9002
-
-client = TestClient(app)
+# Assigned by setup_db from the conftest-provided test session factory.
+_SessionLocal = None
+client = TestClient(app)  # replaced with isolated-DB client in setup_db
 
 
 def _load(module_name, rel_path):
@@ -46,27 +49,39 @@ def _load(module_name, rel_path):
 chunking = _load("phase4_chunking_service", "services/parser/chunking_service.py")
 ingestion_job = _load("phase4_ingestion_job", os.path.join("apps", "api", "services", "ingestion_job.py"))
 
+# `_load` execs ingestion_job.py again under a different module name, so its
+# `from database import SessionLocal` is a separate binding. Rebind it at
+# fixture time to the isolated test engine (see tests/conftest.py).
+def _bind_ingestion_to_test_engine(session_local):
+    """Make the ad-hoc ingestion module use the temporary engine."""
+    ingestion_job.SessionLocal = session_local
+    database.SessionLocal = session_local
+    assert ingestion_job.SessionLocal is session_local
+
+
 
 # --------------------------------------------------------------------------
 # Fixtures
 # --------------------------------------------------------------------------
 
 @pytest.fixture(scope="module", autouse=True)
-def setup_db():
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
+def setup_db(isolated_application_engine, TestingSessionLocal):
+    global _SessionLocal, client
+    _SessionLocal = TestingSessionLocal
+    _bind_ingestion_to_test_engine(TestingSessionLocal)
+    client = TestClient(app)
+    db = _SessionLocal()
     db.add(Repository(id=REPO_A, url="https://github.com/test/chunk-a", status=RepositoryStatus.completed))
     db.add(Repository(id=REPO_B, url="https://github.com/test/chunk-b", status=RepositoryStatus.completed))
     db.commit()
     db.close()
     yield
-    db = SessionLocal()
+    db = _SessionLocal()
     db.query(DBChunk).filter(DBChunk.repository_id.in_([REPO_A, REPO_B])).delete(synchronize_session=False)
 
     file_ids = db.query(DBFile.id).filter(DBFile.repository_id.in_([REPO_A, REPO_B]))
     db.query(DBSymbol).filter(DBSymbol.file_id.in_(file_ids)).delete(synchronize_session=False)
 
-    # Clean up dependencies and commit file changes to avoid FK violations
     from models import Dependency as DBDependency, CommitFileChange as DBCommitFileChange, Commit as DBCommit
     db.query(DBDependency).filter((DBDependency.source_file_id.in_(file_ids)) | (DBDependency.target_file_id.in_(file_ids))).delete(synchronize_session=False)
     db.query(DBCommitFileChange).filter(DBCommitFileChange.file_id.in_(file_ids)).delete(synchronize_session=False)
@@ -108,7 +123,7 @@ def sample_repo():
 
 def _ingest(repo_id, local_path):
     """Run the real ingestion pipeline against a local repo path."""
-    db = SessionLocal()
+    db = _SessionLocal()
     repo = db.query(Repository).filter(Repository.id == repo_id).first()
     repo.url = "file:///" + local_path.replace("\\", "/")
     repo.status = RepositoryStatus.pending
@@ -118,7 +133,7 @@ def _ingest(repo_id, local_path):
 
 
 def _chunks(repo_id):
-    db = SessionLocal()
+    db = _SessionLocal()
     rows = (
         db.query(DBChunk)
         .filter(DBChunk.repository_id == repo_id)
@@ -190,7 +205,7 @@ def test_chunk_metadata_is_populated(sample_repo):
 def test_reuses_existing_file_and_symbol_rows(sample_repo):
     """Chunking must not duplicate the File/Symbol records it derives from."""
     _ingest(REPO_A, sample_repo)
-    db = SessionLocal()
+    db = _SessionLocal()
     files = db.query(DBFile).filter(DBFile.repository_id == REPO_A).all()
     file_ids = [f.id for f in files]
     symbol_count = db.query(DBSymbol).filter(DBSymbol.file_id.in_(file_ids)).count()
@@ -232,14 +247,14 @@ def test_build_file_chunks_handles_binary_and_missing_files():
 
 def test_re_ingestion_does_not_duplicate_chunks(sample_repo):
     _ingest(REPO_A, sample_repo)
-    db = SessionLocal()
+    db = _SessionLocal()
     first_ids = sorted(c.id for c in db.query(DBChunk).filter(DBChunk.repository_id == REPO_A).all())
     first_count = len(first_ids)
     db.close()
 
     _ingest(REPO_A, sample_repo)
 
-    db = SessionLocal()
+    db = _SessionLocal()
     second = db.query(DBChunk).filter(DBChunk.repository_id == REPO_A).all()
     second_ids = sorted(c.id for c in second)
     db.close()
@@ -251,7 +266,7 @@ def test_re_ingestion_does_not_duplicate_chunks(sample_repo):
 
 def test_re_ingestion_updates_chunk_content_when_file_changes(sample_repo):
     _ingest(REPO_A, sample_repo)
-    db = SessionLocal()
+    db = _SessionLocal()
     before = (
         db.query(DBChunk)
         .filter(DBChunk.repository_id == REPO_A, DBChunk.path == "mod.py", DBChunk.chunk_type == "module")
@@ -278,7 +293,7 @@ def test_re_ingestion_updates_chunk_content_when_file_changes(sample_repo):
 
     _ingest(REPO_A, sample_repo)
 
-    db = SessionLocal()
+    db = _SessionLocal()
     after = (
         db.query(DBChunk)
         .filter(DBChunk.repository_id == REPO_A, DBChunk.path == "mod.py", DBChunk.chunk_type == "module")
@@ -323,7 +338,7 @@ def test_chunks_are_isolated_per_repository(sample_repo):
         assert b_total == len(b_chunks)
 
         # A repeated chunk_key across repositories is allowed.
-        db = SessionLocal()
+        db = _SessionLocal()
         keys_a = {c.chunk_key for c in db.query(DBChunk).filter(DBChunk.repository_id == REPO_A).all()}
         keys_b = {c.chunk_key for c in db.query(DBChunk).filter(DBChunk.repository_id == REPO_B).all()}
         db.close()

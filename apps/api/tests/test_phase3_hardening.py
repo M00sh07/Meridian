@@ -22,7 +22,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from fastapi.testclient import TestClient
 from main import app
-from database import Base, engine, SessionLocal
+from database import Base
 from models import (
     Repository,
     File as DBFile,
@@ -30,9 +30,12 @@ from models import (
     CommitFileChange,
     RepositoryStatus,
 )
-# Import the Git service by file path. `apps/api/services/__init__.py` makes the
-# name `services` resolve to apps/api/services, which shadows the top-level
-# services package that holds ingestion/ and parser/.
+
+REPO_A = 8201
+REPO_B = 8202
+REPO_EMPTY = 8203
+
+# Import the Git service by file path to avoid shadowing by apps/api/services.
 import importlib.util
 _git_service_path = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "services", "ingestion", "git_service.py")
@@ -43,18 +46,19 @@ _spec.loader.exec_module(_git_service)
 extract_commits = _git_service.extract_commits
 extract_commits_with_changes = _git_service.extract_commits_with_changes
 
-# Isolated IDs so this module never collides with other test modules.
-REPO_A = 8201
-REPO_B = 8202
-REPO_EMPTY = 8203
-
-client = TestClient(app)
+# Assigned by setup_db from the conftest-provided test session factory.
+_SessionLocal = None
+client = TestClient(app)  # replaced with isolated-DB client in setup_db
 
 
 @pytest.fixture(scope="module", autouse=True)
-def setup_db():
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
+def setup_db(isolated_application_engine, TestingSessionLocal):
+    # The temporary engine and schema come from conftest.py; Base.metadata is
+    # already created there, so this fixture only seeds data.
+    global _SessionLocal, client
+    _SessionLocal = TestingSessionLocal
+    client = TestClient(app)
+    db = _SessionLocal()
 
     db.add(Repository(id=REPO_A, url="https://github.com/test/hard-a", status=RepositoryStatus.completed))
     db.add(Repository(id=REPO_B, url="https://github.com/test/hard-b", status=RepositoryStatus.completed))
@@ -80,7 +84,7 @@ def setup_db():
 
     yield
 
-    db = SessionLocal()
+    db = _SessionLocal()
     db.query(CommitFileChange).filter(CommitFileChange.commit_id.in_([8201, 8202, 8203])).delete(synchronize_session=False)
     db.query(Commit).filter(Commit.repository_id.in_([REPO_A, REPO_B, REPO_EMPTY])).delete(synchronize_session=False)
     db.query(DBFile).filter(DBFile.repository_id.in_([REPO_A, REPO_B, REPO_EMPTY])).delete(synchronize_session=False)
@@ -122,8 +126,14 @@ def test_hotspots_do_not_leak_across_repositories():
     assert data[0]["total_changes"] == 2
 
 
-def test_unknown_repository_is_404_for_all_phase3_endpoints():
-    unknown = 999
+def test_unknown_repository_is_404_for_all_phase3_endpoints(TestingSessionLocal):
+    # The unknown id is derived from the isolated database, never hardcoded.
+    db = TestingSessionLocal()
+    known_ids = {row.id for row in db.query(Repository.id).all()}
+    db.close()
+
+    unknown = max(known_ids) + 1 if known_ids else 1
+    assert unknown not in known_ids
     assert client.get(f"/repositories/{unknown}/commits").status_code == 404
     assert client.get(f"/repositories/{unknown}/commits/sha-a1/changes").status_code == 404
     assert client.get(f"/repositories/{unknown}/files/8201/commits").status_code == 404
@@ -132,8 +142,10 @@ def test_unknown_repository_is_404_for_all_phase3_endpoints():
 
 
 def test_unknown_file_is_404():
-    assert client.get(f"/repositories/{REPO_A}/files/987654/commits").status_code == 404
-    assert client.get(f"/repositories/{REPO_A}/files/987654/churn").status_code == 404
+    # File ids are all below this sentinel in the isolated database.
+    missing_file_id = 10 ** 9
+    assert client.get(f"/repositories/{REPO_A}/files/{missing_file_id}/commits").status_code == 404
+    assert client.get(f"/repositories/{REPO_A}/files/{missing_file_id}/churn").status_code == 404
 
 
 def test_unknown_sha_is_404():
@@ -148,7 +160,7 @@ def test_empty_repository_returns_empty_results():
 
 
 def test_file_with_no_history_returns_zero_churn():
-    db = SessionLocal()
+    db = _SessionLocal()
     db.add(DBFile(id=8299, repository_id=REPO_A, path="src/no_history.py", language="python"))
     db.commit()
     db.close()
@@ -161,7 +173,7 @@ def test_file_with_no_history_returns_zero_churn():
         assert data["renamed_count"] == 0
         assert client.get(f"/repositories/{REPO_A}/files/8299/commits").json()["total"] == 0
     finally:
-        db = SessionLocal()
+        db = _SessionLocal()
         db.query(DBFile).filter(DBFile.id == 8299).delete()
         db.commit()
         db.close()
@@ -347,7 +359,7 @@ def test_extract_commits_only_yields_known_change_types(temp_git_repo):
 def test_duplicate_commit_sha_in_same_repository_is_rejected():
     # The (repository_id, sha) uniqueness must hold at the schema level."
     from sqlalchemy.exc import IntegrityError
-    db = SessionLocal()
+    db = _SessionLocal()
     db.add(Repository(id=8401, url="https://github.com/test/hard-dup", status=RepositoryStatus.completed))
     db.add(Commit(id=8401, repository_id=8401, sha="dup-sha", message="first",
                   committed_at=datetime(2026, 1, 1)))
@@ -367,7 +379,7 @@ def test_duplicate_commit_sha_in_same_repository_is_rejected():
 
 def test_same_sha_allowed_in_different_repositories():
     # Uniqueness is per repository, so the same SHA may exist in two repos."
-    db = SessionLocal()
+    db = _SessionLocal()
     db.add(Repository(id=8402, url="https://github.com/test/hard-dup-b", status=RepositoryStatus.completed))
     db.add(Commit(id=8403, repository_id=8402, sha="sha-a1", message="same sha, other repo",
                   committed_at=datetime(2026, 1, 1)))
@@ -383,7 +395,7 @@ def test_same_sha_allowed_in_different_repositories():
 
 def test_hotspot_recent_window_boundary():
     """A change exactly at the 90-day boundary must count as recent."""
-    db = SessionLocal()
+    db = _SessionLocal()
     repo = Repository(id=8301, url="https://github.com/test/hard-window", status=RepositoryStatus.completed)
     db.add(repo)
     db.add(DBFile(id=8301, repository_id=8301, path="src/window.py", language="python"))
@@ -407,7 +419,7 @@ def test_hotspot_recent_window_boundary():
         actual = datetime.fromisoformat(data[0]["last_changed_at"])
         assert abs((actual - expected).total_seconds()) < 5
     finally:
-        db = SessionLocal()
+        db = _SessionLocal()
         db.query(CommitFileChange).filter(CommitFileChange.commit_id.in_([8301, 8302])).delete(synchronize_session=False)
         db.query(Commit).filter(Commit.repository_id == 8301).delete(synchronize_session=False)
         db.query(DBFile).filter(DBFile.repository_id == 8301).delete(synchronize_session=False)
