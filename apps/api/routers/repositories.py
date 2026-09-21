@@ -45,8 +45,10 @@ def create_repository(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    if not repo_in.url.startswith("https://github.com/"):
-        raise HTTPException(status_code=400, detail="Only HTTPS GitHub URLs are supported.")
+    from services.ingestion_job import is_safe_github_url
+
+    if not is_safe_github_url(repo_in.url):
+        raise HTTPException(status_code=400, detail="Only valid HTTPS GitHub URLs are supported.")
     # Check if exists
     repo = db.query(Repository).filter(Repository.url == repo_in.url).first()
     if repo:

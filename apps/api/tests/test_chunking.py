@@ -62,12 +62,17 @@ def setup_db():
     yield
     db = SessionLocal()
     db.query(DBChunk).filter(DBChunk.repository_id.in_([REPO_A, REPO_B])).delete(synchronize_session=False)
-    db.query(DBSymbol).filter(
-        DBSymbol.file_id.in_(
-            db.query(DBFile.id).filter(DBFile.repository_id.in_([REPO_A, REPO_B]))
-        )
-    ).delete(synchronize_session=False)
+
+    file_ids = db.query(DBFile.id).filter(DBFile.repository_id.in_([REPO_A, REPO_B]))
+    db.query(DBSymbol).filter(DBSymbol.file_id.in_(file_ids)).delete(synchronize_session=False)
+
+    # Clean up dependencies and commit file changes to avoid FK violations
+    from models import Dependency as DBDependency, CommitFileChange as DBCommitFileChange, Commit as DBCommit
+    db.query(DBDependency).filter((DBDependency.source_file_id.in_(file_ids)) | (DBDependency.target_file_id.in_(file_ids))).delete(synchronize_session=False)
+    db.query(DBCommitFileChange).filter(DBCommitFileChange.file_id.in_(file_ids)).delete(synchronize_session=False)
+
     db.query(DBFile).filter(DBFile.repository_id.in_([REPO_A, REPO_B])).delete(synchronize_session=False)
+    db.query(DBCommit).filter(DBCommit.repository_id.in_([REPO_A, REPO_B])).delete(synchronize_session=False)
     db.query(Repository).filter(Repository.id.in_([REPO_A, REPO_B])).delete(synchronize_session=False)
     db.commit()
     db.close()

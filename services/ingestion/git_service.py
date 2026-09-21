@@ -2,15 +2,51 @@ import os
 import shutil
 import tempfile
 import git
+import re
+from urllib.parse import urlparse
 from typing import List, Optional
 from pydantic import HttpUrl
 
-def validate_github_url(url: str) -> bool:
-    return url.startswith("https://github.com/") and len(url.split("/")) >= 4
+
+def is_safe_github_url(url: str) -> bool:
+    try:
+        # Prevent any whitespace injection
+        if any(c.isspace() for c in url):
+            return False
+
+        # Parse the URL
+        parsed = urlparse(url)
+
+        # 1. Exact Scheme and Hostname
+        if parsed.scheme != "https" or parsed.hostname != "github.com":
+            return False
+
+        # 2. No userinfo, ports, query, or fragments
+        if parsed.username or parsed.password or parsed.port or parsed.query or parsed.fragment:
+            return False
+
+        # 3. Strict path structure: /owner/repo (optional .git, optional /)
+        if not re.match(r"^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?/?$", parsed.path):
+            return False
+
+        # 4. Reject encoded path traversals or malformed structures explicitly
+        if ".." in parsed.path or "%" in parsed.path or "\\" in url:
+            return False
+
+        return True
+    except ValueError: # Catch invalid ports during parsing
+        return False
+    except Exception:
+        return False
 
 def clone_repository(url: str, dest_dir: str):
-    """Shallow clone a repository."""
-    git.Repo.clone_from(url, dest_dir)
+    """Shallow clone a repository with strict SSRF mitigations."""
+    env = os.environ.copy()
+    env["GIT_CONFIG_COUNT"] = "1"
+    env["GIT_CONFIG_KEY_0"] = "http.followRedirects"
+    env["GIT_CONFIG_VALUE_0"] = "false"
+
+    git.Repo.clone_from(url, dest_dir, env=env)
 
 
 def _iter_commits(repository):

@@ -2,13 +2,10 @@ import pytest
 import sys
 import os
 
-# Monorepo root for services.*
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 # apps/api root for main, database, models, etc.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from services.ingestion.git_service import validate_github_url
-from services.parser.tree_sitter_service import detect_language
+from services.ingestion_job import is_safe_github_url, detect_language
 from fastapi.testclient import TestClient
 from main import app
 from database import Base, engine
@@ -20,9 +17,9 @@ def setup_db():
     Base.metadata.drop_all(bind=engine)
 
 def test_validate_github_url():
-    assert validate_github_url("https://github.com/owner/repo") is True
-    assert validate_github_url("http://github.com/owner/repo") is False
-    assert validate_github_url("https://gitlab.com/owner/repo") is False
+    assert is_safe_github_url("https://github.com/owner/repo") is True
+    assert is_safe_github_url("http://github.com/owner/repo") is False
+    assert is_safe_github_url("https://gitlab.com/owner/repo") is False
 
 def test_detect_language():
     assert detect_language("test.py") == "python"

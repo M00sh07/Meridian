@@ -19,6 +19,7 @@ def _load_module(dotted_name: str, rel_path: str):
 _git_svc = _load_module("git_service", "services/ingestion/git_service.py")
 _parser_svc = _load_module("tree_sitter_service", "services/parser/tree_sitter_service.py")
 _chunking_svc = _load_module("chunking_service", "services/parser/chunking_service.py")
+is_safe_github_url = _git_svc.is_safe_github_url
 clone_repository = _git_svc.clone_repository
 extract_commits = _git_svc.extract_commits
 discover_files = _git_svc.discover_files
