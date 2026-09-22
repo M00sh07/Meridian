@@ -274,6 +274,14 @@ def _store_chunks(db, repo_id, db_files, file_symbols, temp_dir):
             symbols=file_symbols.get(path, []),
         )
 
+        if built is None:
+            # Transient parser/extraction failure. Preserve existing chunks for this file
+            # by removing them from existing_chunks so they aren't deleted.
+            for chunk_key, stale in list(existing_chunks.items()):
+                if stale.path == path:
+                    del existing_chunks[chunk_key]
+            continue
+
         seen_keys = set()
         for chunk_data in built:
             chunk_key = chunk_data['chunk_key']
@@ -292,6 +300,7 @@ def _store_chunks(db, repo_id, db_files, file_symbols, temp_dir):
                 existing.end_line = chunk_data['end_line']
                 existing.content = chunk_data['content']
                 existing.content_hash = chunk_data['content_hash']
+                del existing_chunks[chunk_key]
             else:
                 db.add(DBChunk(
                     repository_id=repo_id,
@@ -299,12 +308,10 @@ def _store_chunks(db, repo_id, db_files, file_symbols, temp_dir):
                     **chunk_data,
                 ))
 
-        # Drop chunks for this file that no longer correspond to any content
-        # (e.g. a symbol was removed).
-        for chunk_key, stale in list(existing_chunks.items()):
-            if stale.path == path and chunk_key not in seen_keys:
-                db.delete(stale)
-                del existing_chunks[chunk_key]
+    # Drop all chunks that were not seen during this ingestion pass
+    # This handles both removed symbols within existing files, and completely deleted files.
+    for stale in existing_chunks.values():
+        db.delete(stale)
 
     db.commit()
 

@@ -68,7 +68,7 @@ def _slice_lines(lines: List[str], start_line: int, end_line: int) -> str:
 
 
 def build_file_chunks(path: str, file_path: str, language: Optional[str],
-                      symbols: List[Dict]) -> List[Dict]:
+                      symbols: List[Dict]) -> Optional[List[Dict]]:
     """Build the ordered chunk list for a single file.
 
     ``symbols`` entries are dicts with ``id``, ``name``, ``type``,
@@ -76,7 +76,7 @@ def build_file_chunks(path: str, file_path: str, language: Optional[str],
     """
     content = _read_text(file_path)
     if content is None:
-        return []
+        return None
 
     lines = content.splitlines()
     chunks: List[Dict] = []

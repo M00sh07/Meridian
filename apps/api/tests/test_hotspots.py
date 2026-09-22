@@ -1,7 +1,7 @@
 import pytest
 import sys
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 # Monorepo root
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
@@ -14,7 +14,7 @@ from models import Repository, File, Commit, CommitFileChange, RepositoryStatus
 
 client = TestClient(app)
 
-NOW = datetime.utcnow()
+NOW = datetime.now(UTC)
 
 _repo_a = None
 _repo_empty = None

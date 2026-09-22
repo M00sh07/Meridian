@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from fastapi import HTTPException
@@ -45,7 +45,7 @@ def get_risk_features(db: Session, repo_id: int, path: str, depth: int = 1) -> R
         CommitFileChange.file_id == target_file.id
     ).count()
 
-    recent_cutoff = datetime.utcnow() - timedelta(days=RECENT_WINDOW_DAYS)
+    recent_cutoff = datetime.now(UTC) - timedelta(days=RECENT_WINDOW_DAYS)
     recent_commit_query = db.query(Commit.id).join(CommitFileChange).filter(
         CommitFileChange.file_id == target_file.id,
         Commit.committed_at >= recent_cutoff

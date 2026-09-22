@@ -235,8 +235,8 @@ def test_build_file_chunks_handles_binary_and_missing_files():
         binary = os.path.join(tmp, "b.bin")
         with open(binary, "wb") as handle:
             handle.write(b"\x00\x01\x02binary")
-        assert chunking.build_file_chunks("b.bin", binary, None, []) == []
-        assert chunking.build_file_chunks("missing.py", os.path.join(tmp, "nope.py"), "python", []) == []
+        assert chunking.build_file_chunks("b.bin", binary, None, []) is None
+        assert chunking.build_file_chunks("missing.py", os.path.join(tmp, "nope.py"), "python", []) is None
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

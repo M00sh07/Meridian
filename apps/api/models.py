@@ -1,7 +1,7 @@
 import enum
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, UniqueConstraint
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from database import Base
 from vector_type import build_vector_type
 from services.embedding_config import get_dimension
@@ -19,8 +19,8 @@ class Repository(Base):
     id = Column(Integer, primary_key=True, index=True)
     url = Column(String, unique=True, index=True, nullable=False)
     status = Column(Enum(RepositoryStatus), default=RepositoryStatus.pending)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     files = relationship("File", back_populates="repository", cascade="all, delete-orphan")
     commits = relationship("Commit", back_populates="repository", cascade="all, delete-orphan")
@@ -64,7 +64,7 @@ class File(Base):
     repository_id = Column(Integer, ForeignKey("repositories.id"), nullable=False)
     path = Column(String, nullable=False, index=True)
     language = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     repository = relationship("Repository", back_populates="files")
     symbols = relationship("Symbol", back_populates="file", cascade="all, delete-orphan")
@@ -124,8 +124,8 @@ class Chunk(Base):
     embedding_dimension = Column(Integer, nullable=True)
     embedded_content_hash = Column(String, nullable=True, index=True)
     embedded_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     repository = relationship("Repository")
     file = relationship("File")

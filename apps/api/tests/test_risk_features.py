@@ -7,7 +7,7 @@ next to the tests.
 """
 import pytest
 from fastapi.testclient import TestClient
-from datetime import datetime
+from datetime import datetime, UTC
 from models import File, Repository, Symbol, Dependency, Commit, CommitFileChange
 from main import app
 
@@ -24,9 +24,9 @@ def populate_test_data(isolated_application_engine, TestingSessionLocal):
     db = TestingSessionLocal()
     global _repo_id, _repo2_id
     
-    repo = Repository(url="https://github.com/test/risk", status="completed", created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+    repo = Repository(url="https://github.com/test/risk", status="completed", created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
     db.add(repo)
-    repo2 = Repository(url="https://github.com/test/risk2", status="completed", created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+    repo2 = Repository(url="https://github.com/test/risk2", status="completed", created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
     db.add(repo2)
     db.commit()
     
@@ -53,7 +53,7 @@ def populate_test_data(isolated_application_engine, TestingSessionLocal):
     db.commit()
     
     from datetime import timedelta
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     # c1: older than 30 days
     c1 = Commit(repository_id=repo.id, sha="hash1", author_name="A", message="msg1", committed_at=now - timedelta(days=40))
     # c2: recent

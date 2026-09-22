@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 import pytest
 import git
@@ -399,7 +399,7 @@ def test_hotspot_recent_window_boundary():
     repo = Repository(id=8301, url="https://github.com/test/hard-window", status=RepositoryStatus.completed)
     db.add(repo)
     db.add(DBFile(id=8301, repository_id=8301, path="src/window.py", language="python"))
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     db.add(Commit(id=8301, repository_id=8301, sha="w-recent", message="recent",
                   committed_at=now - timedelta(days=89)))
     db.add(Commit(id=8302, repository_id=8301, sha="w-old", message="old",
@@ -416,7 +416,7 @@ def test_hotspot_recent_window_boundary():
         assert data[0]["total_changes"] == 2
         assert data[0]["recent_changes"] == 1
         expected = now - timedelta(days=89)
-        actual = datetime.fromisoformat(data[0]["last_changed_at"])
+        actual = datetime.fromisoformat(data[0]["last_changed_at"]).replace(tzinfo=UTC)
         assert abs((actual - expected).total_seconds()) < 5
     finally:
         db = _SessionLocal()

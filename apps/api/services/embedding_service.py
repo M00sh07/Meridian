@@ -9,7 +9,7 @@ independently. If the provider raises, the affected chunks are left untouched
 (their previous embedding and all chunk data are preserved) and the failure is
 reported back to the caller rather than propagated as corruption.
 """
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -68,7 +68,7 @@ def embed_repository_chunks(db: Session, repo_id: int, batch_size: int = DEFAULT
             )
             continue
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         for chunk, vector in zip(batch, vectors):
             # Assign only after every vector in the batch is in hand, so a
             # partial failure never leaves a half-updated batch persisted.

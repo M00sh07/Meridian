@@ -1,6 +1,6 @@
 import os
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy import case, func
@@ -99,7 +99,7 @@ def get_repository_files(
 ):
     query = db.query(File).filter(File.repository_id == repo_id)
     total = query.count()
-    items = query.offset((page - 1) * size).limit(size).all()
+    items = query.order_by(File.path, File.id).offset((page - 1) * size).limit(size).all()
     return {"items": items, "total": total, "page": page, "size": size}
 @router.get("/{repo_id}/symbols", response_model=PaginatedSymbols)
 def get_repository_symbols(
@@ -111,7 +111,7 @@ def get_repository_symbols(
     # Join File to filter by repo_id
     query = db.query(Symbol).join(File).filter(File.repository_id == repo_id)
     total = query.count()
-    items = query.offset((page - 1) * size).limit(size).all()
+    items = query.order_by(File.path, Symbol.name, Symbol.id).offset((page - 1) * size).limit(size).all()
     return {"items": items, "total": total, "page": page, "size": size}
 @router.get("/{repo_id}/commits", response_model=PaginatedCommits)
 def get_repository_commits(
@@ -219,7 +219,7 @@ def get_repository_hotspots(
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
 
-    recent_cutoff = datetime.utcnow() - timedelta(days=HOTSPOT_RECENT_WINDOW_DAYS)
+    recent_cutoff = datetime.now(UTC) - timedelta(days=HOTSPOT_RECENT_WINDOW_DAYS)
 
     rows = (
         db.query(
