@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { useParams } from "next/navigation";
+import { motion, AnimatePresence } from "motion/react";
 import { api } from "@/lib/api";
 import {
   Background,
@@ -12,7 +13,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { GitCommit, GitGraph, File, History, Flame, Folder, AlertTriangle, ArrowRight, ArrowLeft, Search, Zap, ShieldAlert, Box } from "lucide-react";
+import { GitCommit, GitGraph, File, History, Flame, Folder, ArrowLeft, Search, Zap, ShieldAlert, Box } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
@@ -28,21 +29,42 @@ interface FileChurn { commits_count: number; lines_added: number; lines_deleted:
 // --- Sub-Components ---
 function OverviewTab({ repo }: { repo: Repository }) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="mer-stat">
-          <div className="mer-stat-label">Repository ID</div>
-          <div className="mer-stat-value">{repo.id}</div>
-        </div>
-        <div className="mer-stat">
-          <div className="mer-stat-label">Status</div>
-          <div className="mer-stat-value text-mer-cyan">{repo.status}</div>
-        </div>
-        <div className="mer-stat">
-          <div className="mer-stat-label">URL</div>
-          <div className="mer-stat-value text-xs truncate" title={repo.url}>{repo.url}</div>
-        </div>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="mer-stat bg-white/[0.02]">
+          <div className="mer-stat-label">System.ID</div>
+          <div className="mer-stat-value font-mono">{repo.id.toString().padStart(6, '0')}</div>
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="mer-stat bg-white/[0.02]">
+          <div className="mer-stat-label">Lifecycle.State</div>
+          <div className={cn("mer-stat-value uppercase tracking-widest text-sm", repo.status === 'completed' ? "text-mer-cyan" : repo.status === 'failed' ? "text-mer-magenta" : "text-mer-amber")}>{repo.status}</div>
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="mer-stat bg-white/[0.02] md:col-span-2">
+          <div className="mer-stat-label">Source.Coordinate</div>
+          <div className="mer-stat-value text-xs font-mono text-white/70 truncate flex items-center gap-2" title={repo.url}>
+            <Folder size={12} className="text-white/30" />
+            {repo.url}
+          </div>
+        </motion.div>
       </div>
+
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="mer-frame-thick p-8 rounded-sm relative overflow-hidden">
+        <div className="absolute inset-0 mer-topology opacity-20 pointer-events-none" />
+        <div className="relative z-10 max-w-2xl">
+          <h2 className="text-2xl font-bold tracking-tight text-white mb-4">Structural Overview Active</h2>
+          <p className="text-sm font-mono text-white/50 leading-relaxed mb-6">
+            &gt; SYSTEM HAS INGESTED TARGET REPOSITORY. USE DIAGNOSTIC TABS TO EXPLORE ARCHITECTURE, FILES, CHURN METRICS, AND RISK TOPOLOGY.
+          </p>
+          <div className="flex gap-4">
+            <div className="flex items-center gap-2 text-xs font-mono text-mer-amber bg-mer-amber/10 px-3 py-1.5 rounded-sm border border-mer-amber/20">
+              <Zap size={14} /> Telemetry Online
+            </div>
+            <div className="flex items-center gap-2 text-xs font-mono text-mer-cyan bg-mer-cyan/10 px-3 py-1.5 rounded-sm border border-mer-cyan/20">
+              <ShieldAlert size={14} /> Shields Nominal
+            </div>
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 }
@@ -95,12 +117,10 @@ function ArchitectureTab({ repoId }: { repoId: number }) {
 }
 
 function FileIntelligence({ repoId, file }: { repoId: number; file: FileItem }) {
-  const [commits, setCommits] = useState<CommitItem[]>([]);
   const [churn, setChurn] = useState<FileChurn | null>(null);
   const [symbols, setSymbols] = useState<SymbolItem[]>([]);
 
   useEffect(() => {
-    api.getFileCommits(repoId, file.id).then(res => setCommits(res.items || []));
     api.getFileChurn(repoId, file.id).then(setChurn);
     api.getSymbols(repoId).then(res => {
       setSymbols((res.items || []).filter((s: SymbolItem) => s.file_id === file.id));
@@ -108,38 +128,51 @@ function FileIntelligence({ repoId, file }: { repoId: number; file: FileItem }) 
   }, [repoId, file.id]);
 
   return (
-    <div className="mt-4 p-4 bg-black/40 border border-white/5 rounded-md space-y-4">
-      <h3 className="text-sm font-medium text-white/90 border-b border-white/10 pb-2 mb-2">File Intelligence</h3>
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mt-6 p-5 bg-graphite-950/50 border border-white/5 rounded-sm space-y-6 shadow-inner relative overflow-hidden"
+    >
+      <div className="absolute top-0 right-0 p-2 opacity-10"><File size={60} /></div>
+      <div className="relative z-10">
+        <h3 className="text-xs font-mono tracking-widest text-mer-amber border-b border-white/10 pb-2 mb-4 uppercase">Intelligence.Report</h3>
 
-      <div className="grid grid-cols-3 gap-4">
-        <div className="mer-stat">
-          <div className="mer-stat-label">Commits</div>
-          <div className="mer-stat-value">{churn?.commits_count ?? 0}</div>
-        </div>
-        <div className="mer-stat">
-          <div className="mer-stat-label">Lines Added</div>
-          <div className="mer-stat-value text-emerald-500">{churn?.lines_added ?? 0}</div>
-        </div>
-        <div className="mer-stat">
-          <div className="mer-stat-label">Lines Deleted</div>
-          <div className="mer-stat-value text-red-500">{churn?.lines_deleted ?? 0}</div>
-        </div>
-      </div>
-
-      {symbols.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="text-xs font-medium text-white/70">Symbols</h4>
-          <div className="space-y-1">
-            {symbols.map(s => (
-              <div key={s.id} className="text-xs font-mono bg-white/5 px-2 py-1 rounded flex justify-between">
-                <span className="text-mer-cyan">{s.name}</span>
-                <span className="text-white/40">{s.type}</span>
-              </div>
-            ))}
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="mer-stat bg-white/[0.02]">
+            <div className="mer-stat-label">Commits</div>
+            <div className="mer-stat-value">{churn?.commits_count ?? 0}</div>
+          </div>
+          <div className="mer-stat bg-white/[0.02]">
+            <div className="mer-stat-label text-mer-cyan">L.Added</div>
+            <div className="mer-stat-value text-mer-cyan">{churn?.lines_added ?? 0}</div>
+          </div>
+          <div className="mer-stat bg-white/[0.02]">
+            <div className="mer-stat-label text-mer-magenta">L.Deleted</div>
+            <div className="mer-stat-value text-mer-magenta">{churn?.lines_deleted ?? 0}</div>
           </div>
         </div>
-      )}
-    </div>
+
+        {symbols.length > 0 && (
+          <div className="space-y-3">
+            <h4 className="text-[10px] font-mono tracking-widest text-white/40 uppercase">Detected Symbols</h4>
+            <div className="space-y-1.5 max-h-[300px] overflow-y-auto mer-scroll pr-2">
+              {symbols.map((s, i) => (
+                <motion.div
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  key={s.id}
+                  className="text-xs font-mono bg-graphite-900 border border-white/5 px-3 py-2 rounded-sm flex justify-between items-center group hover:border-mer-cyan/30 transition-colors"
+                >
+                  <span className="text-mer-cyan truncate group-hover:text-mer-cyan">{s.name}</span>
+                  <span className="text-[10px] text-white/30 uppercase tracking-widest bg-white/5 px-1.5 py-0.5 rounded">{s.type}</span>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </motion.div>
   );
 }
 
@@ -152,35 +185,50 @@ function FilesTab({ repoId }: { repoId: number }) {
     api.getFiles(repoId).then(res => setFiles(res.items || [])).finally(() => setLoading(false));
   }, [repoId]);
 
-  if (loading) return <div className="p-4 text-xs font-mono text-white/50">Loading files...</div>;
+  if (loading) return <div className="p-8 text-xs font-mono text-mer-cyan animate-pulse tracking-widest">LOADING_FILE_SYSTEM...</div>;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <div className="space-y-1">
-        {files.map(f => (
-          <button
-            key={f.id}
-            onClick={() => setSelectedFile(f)}
-            className={cn(
-              "w-full text-left px-3 py-2 text-xs font-mono rounded flex justify-between items-center transition-colors",
-              selectedFile?.id === f.id ? "bg-white/10 text-white" : "text-white/60 hover:bg-white/5 hover:text-white/90"
-            )}
-          >
-            <span className="truncate">{f.path}</span>
-            <span className="text-[10px] uppercase text-white/40 border border-white/10 px-1 rounded">{f.language}</span>
-          </button>
-        ))}
+    <div className="grid grid-cols-1 md:grid-cols-12 gap-6 h-[70vh]">
+      <div className="md:col-span-5 flex flex-col border border-white/10 rounded-sm bg-graphite-900/30 overflow-hidden">
+        <div className="p-3 border-b border-white/10 bg-white/5">
+          <h3 className="text-[10px] font-mono text-white/50 tracking-widest uppercase">File Hierarchy</h3>
+        </div>
+        <div className="flex-1 overflow-y-auto mer-scroll p-2 space-y-0.5">
+          {files.map((f, i) => (
+            <motion.button
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: Math.min(i * 0.02, 0.5) }}
+              key={f.id}
+              onClick={() => setSelectedFile(f)}
+              className={cn(
+                "w-full text-left px-3 py-2 text-xs font-mono rounded-sm flex justify-between items-center transition-all group",
+                selectedFile?.id === f.id ? "bg-mer-amber/10 border border-mer-amber/20 text-mer-amber" : "text-white/60 hover:bg-white/5 hover:text-white/90 border border-transparent"
+              )}
+            >
+              <span className="truncate flex-1 pr-4">{f.path}</span>
+              <span className={cn("text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-sm border", selectedFile?.id === f.id ? "border-mer-amber/30 text-mer-amber/80" : "border-white/10 text-white/30 group-hover:text-white/50")}>
+                {f.language}
+              </span>
+            </motion.button>
+          ))}
+        </div>
       </div>
-      <div>
+      <div className="md:col-span-7 h-full overflow-y-auto mer-scroll pr-2">
         {selectedFile ? (
-          <div className="bg-graphite-900 border border-white/10 rounded p-4 sticky top-4">
-            <h3 className="text-sm font-mono text-white mb-2 break-all">{selectedFile.path}</h3>
-            <div className="text-xs text-white/50 mb-4 uppercase">{selectedFile.language}</div>
+          <div className="bg-graphite-900/60 border border-white/10 rounded-sm p-6 relative">
+            <div className="flex items-start justify-between mb-2">
+              <h3 className="text-sm font-mono text-white break-all flex-1">{selectedFile.path}</h3>
+              <div className="px-2 py-1 bg-white/5 border border-white/10 rounded-sm text-[10px] font-mono text-white/50 uppercase tracking-widest ml-4">
+                {selectedFile.language}
+              </div>
+            </div>
             <FileIntelligence repoId={repoId} file={selectedFile} />
           </div>
         ) : (
-          <div className="flex items-center justify-center h-full min-h-[200px] text-xs font-mono text-white/30 border border-white/5 border-dashed rounded">
-            Select a file to inspect
+          <div className="flex flex-col items-center justify-center h-full text-xs font-mono text-white/20 border border-white/5 border-dashed rounded-sm gap-4 p-8">
+            <File size={32} className="opacity-20" />
+            <span>AWAITING_FILE_SELECTION</span>
           </div>
         )}
       </div>
@@ -630,8 +678,11 @@ export default function RepoExplorer() {
 
   if (!repo) {
     return (
-      <div className="min-h-screen bg-graphite-950 flex items-center justify-center p-8">
-        <div className="mer-stat animate-pulse">Loading Observatory...</div>
+      <div className="min-h-screen mer-bg flex items-center justify-center p-8">
+        <div className="flex flex-col items-center gap-4">
+          <Zap className="text-mer-amber animate-pulse" size={24} />
+          <div className="text-[10px] font-mono text-white/40 tracking-widest uppercase">Initializing Observatory Nexus...</div>
+        </div>
       </div>
     );
   }
@@ -649,53 +700,75 @@ export default function RepoExplorer() {
   ] as const;
 
   return (
-    <div className="min-h-screen bg-graphite-950 text-white font-sans selection:bg-mer-cyan/30">
-      <header className="border-b border-white/10 bg-graphite-900/50 backdrop-blur-md sticky top-0 z-10 px-6 py-4 flex items-center justify-between">
+    <div className="min-h-screen mer-bg text-white font-sans selection:bg-mer-cyan/30">
+      <header className="border-b border-white/10 bg-graphite-950/80 backdrop-blur-md sticky top-0 z-20 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Link href="/" className="text-white/40 hover:text-white/90 transition-colors">
             <ArrowLeft size={16} />
           </Link>
           <div className="h-4 w-px bg-white/10" />
           <h1 className="text-sm font-mono tracking-tight flex items-center gap-2">
-            <span className="text-white/50">REPOSITORY</span>
-            <span className="text-mer-cyan">{repo.url.split('/').pop()}</span>
+            <span className="text-white/40 uppercase">Target_</span>
+            <span className="text-mer-amber font-medium">{repo.url.split('/').pop()}</span>
           </h1>
         </div>
-        <div className="text-[10px] uppercase tracking-widest text-white/30 border border-white/10 px-2 py-1 rounded-sm">
-          {repo.status}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-white/30 border border-white/5 bg-white/5 px-2.5 py-1.5 rounded-sm">
+            <div className={cn("w-1.5 h-1.5 rounded-full animate-pulse", repo.status === 'completed' ? "bg-mer-cyan" : repo.status === 'failed' ? "bg-mer-magenta" : "bg-mer-amber")} />
+            {repo.status}
+          </div>
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto p-6 md:p-8 space-y-8">
-        <nav className="flex gap-1 border-b border-white/5 pb-px overflow-x-auto mer-scroll">
+      <div className="max-w-7xl mx-auto p-6 md:p-8 space-y-8">
+        <nav className="flex gap-1 border-b border-white/5 pb-px overflow-x-auto mer-scroll relative">
           {tabs.map(t => (
             <button
               key={t.id}
-              onClick={() => setActiveTab(t.id as 'overview' | 'arch' | 'files' | 'history' | 'hotspots' | 'search' | 'impact' | 'risk' | 'context')}
+              onClick={() => setActiveTab(t.id as any)}
               className={cn(
-                "flex items-center gap-2 px-4 py-2.5 text-xs font-medium uppercase tracking-wider transition-all border-b-2 whitespace-nowrap",
+                "relative flex items-center gap-2 px-5 py-3 text-[11px] font-mono uppercase tracking-widest transition-colors whitespace-nowrap",
                 activeTab === t.id
-                  ? "border-mer-cyan text-mer-cyan bg-mer-cyan/5"
-                  : "border-transparent text-white/50 hover:text-white/90 hover:bg-white/5"
+                  ? "text-mer-amber"
+                  : "text-white/40 hover:text-white/80"
               )}
             >
-              <t.icon size={14} />
+              <t.icon size={14} className={activeTab === t.id ? "text-mer-amber" : "opacity-50"} />
               {t.label}
+              {activeTab === t.id && (
+                <motion.div
+                  layoutId="activeTabIndicator"
+                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-mer-amber"
+                  initial={false}
+                  transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                />
+              )}
             </button>
           ))}
         </nav>
 
-        <main className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-          {activeTab === "overview" && <OverviewTab repo={repo} />}
-          {activeTab === "arch" && <ArchitectureTab repoId={id} />}
-          {activeTab === "files" && <FilesTab repoId={id} />}
-          {activeTab === "history" && <HistoryTab repoId={id} />}
-          {activeTab === "search" && <SearchTab repoId={id} />}
-          {activeTab === "impact" && <ImpactTab repoId={id} />}
-          {activeTab === "risk" && <RiskTab repoId={id} />}
-          {activeTab === "context" && <ContextTab repoId={id} />}
-          {activeTab === "hotspots" && <HotspotsTab repoId={id} />}
-        </main>
+        <div className="relative">
+          <AnimatePresence mode="wait">
+            <motion.main
+              key={activeTab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+              className="mer-frame p-6 rounded-sm min-h-[400px]"
+            >
+              {activeTab === "overview" && <OverviewTab repo={repo} />}
+              {activeTab === "arch" && <ArchitectureTab repoId={id} />}
+              {activeTab === "files" && <FilesTab repoId={id} />}
+              {activeTab === "history" && <HistoryTab repoId={id} />}
+              {activeTab === "search" && <SearchTab repoId={id} />}
+              {activeTab === "impact" && <ImpactTab repoId={id} />}
+              {activeTab === "risk" && <RiskTab repoId={id} />}
+              {activeTab === "context" && <ContextTab repoId={id} />}
+              {activeTab === "hotspots" && <HotspotsTab repoId={id} />}
+            </motion.main>
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   );

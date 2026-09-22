@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { MerLabel } from "@/components/meredian/label";
 import { CommandPalette } from "@/components/meredian/command-palette";
-import { Search, Layout, GitBranch, FileText, GitGraph, Flame, Home, Menu, X, FileSearch, ShieldAlert, Zap, Box } from "lucide-react";
+import { Search, Layout, Home, Menu, X } from "lucide-react";
 
 interface NavItem {
   label: string;
@@ -21,6 +21,7 @@ const NAV: NavItem[] = [
 
 export function MerNav({ repoId }: { repoId?: string }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [collapsed, setCollapsed] = React.useState(false);
   const [cmdOpen, setCmdOpen] = React.useState(false);
 
@@ -43,11 +44,11 @@ export function MerNav({ repoId }: { repoId?: string }) {
         onOpenChange={setCmdOpen}
         onNavigate={(href) => {
           if (repoId) {
-            if (href === "/repo") window.location.assign(`/repo/${repoId}`);
-            else if (href.startsWith("/repo/")) window.location.assign(`/repo/${repoId}${href.slice(5)}`);
-            else window.location.assign(href);
+            if (href === "/repo") router.push(`/repo/${repoId}`);
+            else if (href.startsWith("/repo/")) router.push(`/repo/${repoId}${href.slice(5)}`);
+            else router.push(href);
           } else {
-            window.location.assign(href);
+            router.push(href);
           }
         }}
       />
