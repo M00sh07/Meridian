@@ -27,6 +27,7 @@ from schemas import (
     HistoricalImpactResponse,
     SymbolImpactResponse,
     RiskFeatureResponse,
+    RiskPredictionResponse,
 )
 from services.ingestion_job import process_repository
 from services.embedding_service import embed_repository_chunks, count_pending_chunks
@@ -420,3 +421,20 @@ def get_risk_features_route(
 ):
     from services.risk.feature_extraction import get_risk_features
     return get_risk_features(db, repo_id, path, depth)
+
+@router.get("/{repo_id}/risk/predict/{sha}", response_model=RiskPredictionResponse)
+def predict_proxy_risk(
+    repo_id: int,
+    sha: str,
+    feature_set: str = Query("baseline", pattern="^(baseline|expanded)$"),
+    db: Session = Depends(get_db)
+):
+    from services.ml.prediction import predict_proxy_risk_score, PredictionError
+    try:
+        return predict_proxy_risk_score(db, repo_id, sha, feature_set=feature_set)
+    except PredictionError as e:
+        msg = str(e)
+        if "not found" in msg.lower():
+            raise HTTPException(status_code=404, detail=msg)
+        else:
+            raise HTTPException(status_code=400, detail=msg)

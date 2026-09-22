@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 from models import RepositoryStatus
 
@@ -250,3 +250,17 @@ class RiskFeatureResponse(BaseModel):
     repository_id: int
     target: ImpactTarget
     features: RiskFeatures
+
+class RiskPredictionModelMetadata(BaseModel):
+    name: str
+    version: str
+    class_weight: str
+    features: List[str]
+
+class RiskPredictionResponse(BaseModel):
+    repository_id: int
+    commit_sha: str
+    proxy_risk_score: float
+    model: RiskPredictionModelMetadata
+    features: Dict[str, float]
+    label_definition: str
