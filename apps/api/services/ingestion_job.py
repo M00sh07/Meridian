@@ -83,23 +83,36 @@ def process_repository(repo_id: int):
         clone_repository(repo.url, temp_dir)
 
         existing_commits = {
-            commit.sha
+            commit.sha: commit.id
             for commit in db.query(DBCommit).filter(DBCommit.repository_id == repo.id).all()
+        }
+        existing_commit_changes = {
+            (change.commit_id, change.path, change.change_type)
+            for change in db.query(
+                DBCommitFileChange.commit_id,
+                DBCommitFileChange.path,
+                DBCommitFileChange.change_type
+            ).join(
+                DBCommit, DBCommitFileChange.commit_id == DBCommit.id
+            ).filter(DBCommit.repository_id == repo.id).all()
         }
         # Store changes for later
         commit_changes_map = {}
 
         # Use updated git service method
         for commit_data in _git_svc.extract_commits_with_changes(temp_dir):
-            if commit_data["sha"] in existing_commits:
-                continue
-
+            sha = commit_data["sha"]
             changes = commit_data.pop("changes")
-            commit_obj = DBCommit(repository_id=repo.id, **commit_data)
-            db.add(commit_obj)
-            db.flush() # Get ID
 
-            commit_changes_map[commit_obj.sha] = (commit_obj.id, changes)
+            if sha in existing_commits:
+                commit_id = existing_commits[sha]
+            else:
+                commit_obj = DBCommit(repository_id=repo.id, **commit_data)
+                db.add(commit_obj)
+                db.flush() # Get ID
+                commit_id = commit_obj.id
+
+            commit_changes_map[sha] = (commit_id, changes)
 
         db.commit()
 
@@ -232,6 +245,12 @@ def process_repository(repo_id: int):
         for sha, (commit_id, changes) in commit_changes_map.items():
             for change in changes:
                 file_path = change["path"].replace(os.sep, '/')
+                change_type = change["type"]
+                change_key = (commit_id, file_path, change_type)
+
+                if change_key in existing_commit_changes:
+                    continue
+
                 # Try to find corresponding DBFile
                 db_file = db_files.get(file_path)
 
@@ -240,8 +259,9 @@ def process_repository(repo_id: int):
                     file_id=db_file.id if db_file else None,
                     path=file_path,
                     previous_path=change.get("previous_path"),
-                    change_type=change["type"]
+                    change_type=change_type
                 ))
+                existing_commit_changes.add(change_key)
         db.commit()
 
         repo.status = RepositoryStatus.completed

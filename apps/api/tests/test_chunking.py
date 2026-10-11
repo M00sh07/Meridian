@@ -369,3 +369,100 @@ def test_chunks_api_pagination_and_filter(sample_repo):
     assert client.get(f"/repositories/{REPO_A}/chunks?limit=101").status_code == 422
     assert client.get(f"/repositories/{REPO_A}/chunks?page=0").status_code == 422
     assert total >= 5
+
+
+def test_reingestion_restores_missing_commit_file_changes(sample_repo):
+    """When a prior ingestion failed or was interrupted after commits were saved
+    but before commit file changes were saved, re-ingestion must populate
+    the missing CommitFileChange rows.
+    """
+    from models import CommitFileChange as DBCommitFileChange, Commit as DBCommit
+
+    # Add a second commit so there is a parent-diff commit with file changes
+    with open(os.path.join(sample_repo, "mod.py"), "a", encoding="utf-8") as handle:
+        handle.write("\n# extra change\n")
+    repo = git.Repo(sample_repo)
+    repo.index.add(["mod.py"])
+    second_commit = repo.index.commit("second commit")
+
+    _ingest(REPO_A, sample_repo)
+
+    db = _SessionLocal()
+    # Verify changes were initially created for the second commit
+    commit_row = db.query(DBCommit).filter(DBCommit.repository_id == REPO_A, DBCommit.sha == second_commit.hexsha).first()
+    assert commit_row is not None
+    initial_changes = db.query(DBCommitFileChange).filter(DBCommitFileChange.commit_id == commit_row.id).all()
+    assert len(initial_changes) > 0
+
+    # Simulate an interrupted ingestion state: commits exist, but file changes are missing
+    db.query(DBCommitFileChange).filter(DBCommitFileChange.commit_id == commit_row.id).delete(synchronize_session=False)
+    db.commit()
+    assert db.query(DBCommitFileChange).filter(DBCommitFileChange.commit_id == commit_row.id).count() == 0
+    db.close()
+
+    # Re-ingest (e.g. retry after failure)
+    _ingest(REPO_A, sample_repo)
+
+    # Missing file changes must be restored
+    db = _SessionLocal()
+    restored_changes = db.query(DBCommitFileChange).filter(DBCommitFileChange.commit_id == commit_row.id).all()
+    db.close()
+    assert len(restored_changes) == len(initial_changes)
+
+
+def test_reingestion_completes_partially_persisted_commit_file_changes(sample_repo):
+    """When an ingestion failure leaves a commit with only a partial subset of its
+
+    file changes persisted, re-ingestion must add the missing rows without
+    duplicating the already persisted ones.
+    """
+    from models import CommitFileChange as DBCommitFileChange, Commit as DBCommit
+
+    # Create a commit modifying multiple files
+    with open(os.path.join(sample_repo, "mod.py"), "a", encoding="utf-8") as handle:
+        handle.write("\n# multi change 1\n")
+    with open(os.path.join(sample_repo, "README.md"), "a", encoding="utf-8") as handle:
+        handle.write("\n# multi change 2\n")
+    with open(os.path.join(sample_repo, "new_file.py"), "w", encoding="utf-8") as handle:
+        handle.write("def new_func(): pass\n")
+
+    repo = git.Repo(sample_repo)
+    repo.index.add(["mod.py", "README.md", "new_file.py"])
+    commit = repo.index.commit("multi-file commit")
+
+    _ingest(REPO_A, sample_repo)
+
+    db = _SessionLocal()
+    commit_row = db.query(DBCommit).filter(DBCommit.repository_id == REPO_A, DBCommit.sha == commit.hexsha).first()
+    assert commit_row is not None
+    full_changes = db.query(DBCommitFileChange).filter(DBCommitFileChange.commit_id == commit_row.id).all()
+    # Expect 3 file changes
+    assert len(full_changes) == 3
+    expected_paths = sorted(c.path for c in full_changes)
+    retained_change_id = full_changes[0].id
+
+    # Simulate partial failure: delete 2 of the 3 rows, leaving 1 row persisted
+    db.query(DBCommitFileChange).filter(
+        DBCommitFileChange.commit_id == commit_row.id,
+        DBCommitFileChange.id != retained_change_id
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    partial_count = db.query(DBCommitFileChange).filter(DBCommitFileChange.commit_id == commit_row.id).count()
+    assert partial_count == 1
+    db.close()
+
+    # Re-ingest (retry)
+    _ingest(REPO_A, sample_repo)
+
+    # All missing rows must be restored, exactly 3 total, without duplicating retained row
+    db = _SessionLocal()
+    final_changes = db.query(DBCommitFileChange).filter(DBCommitFileChange.commit_id == commit_row.id).all()
+    final_paths = sorted(c.path for c in final_changes)
+    final_ids = [c.id for c in final_changes]
+    db.close()
+
+    assert len(final_changes) == 3
+    assert final_paths == expected_paths
+    # The retained row ID must still be present (not recreated or duplicated)
+    assert retained_change_id in final_ids
