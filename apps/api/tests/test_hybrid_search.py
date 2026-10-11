@@ -41,6 +41,16 @@ def test_explicit_lexical_mode(test_data, mock_embedding_provider):
     assert results[0]["lexical_score"] > 0
     assert results[0]["semantic_score"] == 0.0
 
+    # Path filter in lexical mode with both forward and backslashes
+    resp_fwd = client.get(f"/repositories/{repo_id}/search?q=database&mode=lexical&path=src/db.py")
+    resp_back = client.get(f"/repositories/{repo_id}/search?q=database&mode=lexical&path=src\\db.py")
+    assert resp_fwd.status_code == 200
+    assert resp_back.status_code == 200
+    assert len(resp_fwd.json()["results"]) == 1
+    assert resp_fwd.json()["results"] == resp_back.json()["results"]
+    assert resp_fwd.json()["total"] == resp_back.json()["total"]
+
+
 
 def test_invalid_mode(test_data):
     repo_id = test_data["repo1_id"]

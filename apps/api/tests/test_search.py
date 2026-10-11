@@ -113,6 +113,13 @@ def test_path_filter(test_data, mock_embedding_provider):
     assert len(results) == 1
     assert "src/db.py" == results[0]["path"]
 
+    # Equivalent Windows path separator must produce identical filtered results
+    response_win = client.get(f"/repositories/{repo_id}/search?q=authentication&path=src\\db.py")
+    results_win = response_win.json()["results"]
+    assert len(results_win) == 1
+    assert "src/db.py" == results_win[0]["path"]
+    assert response_win.json()["total"] == response.json()["total"]
+
 
 def test_symbol_name_filter(test_data, mock_embedding_provider):
     repo_id = test_data["repo1_id"]

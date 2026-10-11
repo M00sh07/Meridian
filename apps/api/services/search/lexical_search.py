@@ -25,7 +25,7 @@ def get_lexical_candidates(
     if language:
         base_query = base_query.filter(Chunk.language == language)
     if path:
-        base_query = base_query.filter(Chunk.path == path)
+        base_query = base_query.filter(Chunk.path == path.replace("\\", "/"))
     if symbol_name:
         base_query = base_query.filter(Chunk.symbol_name == symbol_name)
 

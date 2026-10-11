@@ -51,7 +51,7 @@ def get_semantic_candidates(
     if language:
         base_query = base_query.filter(Chunk.language == language)
     if path:
-        base_query = base_query.filter(Chunk.path == path)
+        base_query = base_query.filter(Chunk.path == path.replace("\\", "/"))
     if symbol_name:
         base_query = base_query.filter(Chunk.symbol_name == symbol_name)
 
@@ -101,6 +101,9 @@ def perform_search(
     path: Optional[str] = None,
     symbol_name: Optional[str] = None
 ) -> Tuple[List[dict], int]:
+
+    if path:
+        path = path.replace("\\", "/")
 
     sw, lw, cm = get_hybrid_config()
     candidate_limit = limit * cm
