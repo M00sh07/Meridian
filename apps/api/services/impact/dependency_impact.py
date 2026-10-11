@@ -16,9 +16,10 @@ def get_dependency_impact(db: Session, repo_id: int, path: str, depth: int) -> d
     if not target_file:
         raise HTTPException(status_code=404, detail="File not found")
 
-    affected_nodes = {}
+    dependent_nodes = {}
+    dependency_nodes = {}
 
-    def traverse(start_ids: List[int], current_depth: int, is_dependent: bool):
+    def traverse(start_ids: List[int], current_depth: int, is_dependent: bool, node_map: dict):
         if current_depth > depth:
             return
         if not start_ids:
@@ -41,8 +42,8 @@ def get_dependency_impact(db: Session, repo_id: int, path: str, depth: int) -> d
                 continue
                 
             # If seen, only update if new depth is smaller
-            if file_obj.id not in affected_nodes or affected_nodes[file_obj.id]["depth"] > current_depth:
-                affected_nodes[file_obj.id] = {
+            if file_obj.id not in node_map or node_map[file_obj.id]["depth"] > current_depth:
+                node_map[file_obj.id] = {
                     "file_id": file_obj.id,
                     "path": file_obj.path,
                     "relationship": "dependent" if is_dependent else "dependency",
@@ -51,16 +52,37 @@ def get_dependency_impact(db: Session, repo_id: int, path: str, depth: int) -> d
                 next_ids.add(file_obj.id)
                 
         if next_ids:
-            traverse(list(next_ids), current_depth + 1, is_dependent)
+            traverse(list(next_ids), current_depth + 1, is_dependent, node_map)
 
-    traverse([target_file.id], 1, is_dependent=True)
-    traverse([target_file.id], 1, is_dependent=False)
+    traverse([target_file.id], 1, is_dependent=True, node_map=dependent_nodes)
+    traverse([target_file.id], 1, is_dependent=False, node_map=dependency_nodes)
+
+    direct_deps = [node for node in dependency_nodes.values() if node["depth"] == 1]
+    direct_deps.sort(key=lambda x: x["path"])
+
+    direct_dependents = [node for node in dependent_nodes.values() if node["depth"] == 1]
+    direct_dependents.sort(key=lambda x: x["path"])
+
+    all_file_ids = set(dependent_nodes.keys()) | set(dependency_nodes.keys())
+    affected_nodes = {}
+    for fid in all_file_ids:
+        dep_node = dependency_nodes.get(fid)
+        dependent_node = dependent_nodes.get(fid)
+
+        if dep_node and dependent_node:
+            if dep_node["depth"] < dependent_node["depth"]:
+                affected_nodes[fid] = dep_node
+            elif dependent_node["depth"] < dep_node["depth"]:
+                affected_nodes[fid] = dependent_node
+            else:
+                affected_nodes[fid] = dependent_node
+        elif dep_node:
+            affected_nodes[fid] = dep_node
+        else:
+            affected_nodes[fid] = dependent_node
 
     affected_list = list(affected_nodes.values())
     affected_list.sort(key=lambda x: (x["depth"], x["path"]))
-
-    direct_deps = [x for x in affected_list if x["relationship"] == "dependency" and x["depth"] == 1]
-    direct_dependents = [x for x in affected_list if x["relationship"] == "dependent" and x["depth"] == 1]
 
     return {
         "repository_id": repo_id,

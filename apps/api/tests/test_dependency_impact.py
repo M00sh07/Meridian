@@ -128,3 +128,57 @@ def test_invalid_depth(impact_test_data):
     repo_id = impact_test_data["repo1_id"]
     response = client.get(f"/repositories/{repo_id}/impact?path=src/a.py&depth=11")
     assert response.status_code == 422  # FastAPI validation Error
+
+
+def test_impact_mutual_and_transitive_dependencies(TestingSessionLocal):
+    """Mutual (circular) dependencies must not cause either direction or transitive children to be dropped."""
+    db = TestingSessionLocal()
+    uid = uuid.uuid4().hex
+    repo = Repository(url=f"https://github.com/test/mutual-{uid}", status="completed")
+    db.add(repo)
+    db.commit()
+    db.refresh(repo)
+
+    f1 = File(repository_id=repo.id, path="src/m1.py")
+    f2 = File(repository_id=repo.id, path="src/m2.py")
+    f3 = File(repository_id=repo.id, path="src/m3.py")
+    db.add_all([f1, f2, f3])
+    db.commit()
+    for f in [f1, f2, f3]:
+        db.refresh(f)
+
+    # Mutual dependency: m1 <-> m2
+    # Transitive dependency: m2 -> m3
+    d1 = Dependency(source_file_id=f1.id, target_file_id=f2.id, imported_module="m2")
+    d2 = Dependency(source_file_id=f2.id, target_file_id=f1.id, imported_module="m1")
+    d3 = Dependency(source_file_id=f2.id, target_file_id=f3.id, imported_module="m3")
+    db.add_all([d1, d2, d3])
+    db.commit()
+
+    file_ids = [f1.id, f2.id, f3.id]
+    repo_id = repo.id
+    db.close()
+
+    try:
+        response = client.get(f"/repositories/{repo_id}/impact?path=src/m1.py&depth=2")
+        assert response.status_code == 200
+        data = response.json()
+
+        # m2 is BOTH a direct dependency and direct dependent of m1
+        dep_paths = [x["path"] for x in data["direct_dependencies"]]
+        dependent_paths = [x["path"] for x in data["direct_dependents"]]
+        assert "src/m2.py" in dep_paths
+        assert "src/m2.py" in dependent_paths
+
+        # Transitive dependency m3 must be discovered through m2 at depth 2
+        affected_paths = [x["path"] for x in data["affected_files"]]
+        assert "src/m2.py" in affected_paths
+        assert "src/m3.py" in affected_paths
+        assert data["total_affected"] == 2
+    finally:
+        db = TestingSessionLocal()
+        db.query(Dependency).filter(Dependency.source_file_id.in_(file_ids)).delete(synchronize_session=False)
+        db.query(File).filter(File.repository_id == repo_id).delete(synchronize_session=False)
+        db.query(Repository).filter(Repository.id == repo_id).delete(synchronize_session=False)
+        db.commit()
+        db.close()
